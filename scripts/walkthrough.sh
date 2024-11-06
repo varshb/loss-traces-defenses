@@ -1,7 +1,3 @@
-source /scratch/euodia/myenv/bin/activate
-log_path=/scratch/euodia/logs
-norm_tracker_path=/home/euodia/loss_traces
-
 exp_id="test"
 cpus="19-20"
 gpu=":0"
@@ -17,40 +13,32 @@ dual_count=1
 
 
 # Train 1st model 
-#echo "Training target model"
-#start_time=$(date +%s)
-#taskset -c $cpus python $norm_tracker_path/main.py --track_grad_norms --gpu $gpu --dataset $dataset --seed 34568 --arch $arch --batchsize $bs --lr $lr --epochs $epochs --exp_id $exp_id
-#end_time=$(date +%s)
-#elapsed_time=$((end_time - start_time))
-#echo "Took $elapsed_time seconds"
+echo "Training target model"
+start_time=$(date +%s)
+taskset -c $cpus python $norm_tracker_path/main.py --track_grad_norms --gpu $gpu --dataset $dataset --seed 34568 --arch $arch --batchsize $bs --lr $lr --epochs $epochs --exp_id $exp_id
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "Took $elapsed_time seconds"
 
 ## Train 'dual' models on same training set, varying randomness for batch selection
-#for ((i=0; i<$dual_count; i++))
-#do
-#    echo "Training dual model $i"
-#    start_time=$(date +%s) #
-#    taskset -c $cpus python $norm_tracker_path/main.py --track_grad_norms --gpu $gpu --dataset $dataset --seed 8574${i} --dual track_both_$i --arch $arch --batchsize $bs --lr $lr --epochs $epochs --exp_id $exp_id
-#    end_time=$(date +%s)
-#    elapsed_time=$((end_time - start_time))
-#    echo "Took $elapsed_time seconds"
-#done
+for ((i=0; i<$dual_count; i++))
+do
+    echo "Training dual model $i"
+    start_time=$(date +%s) #
+    taskset -c $cpus python $norm_tracker_path/main.py --track_grad_norms --gpu $gpu --dataset $dataset --seed 8574${i} --dual track_both_$i --arch $arch --batchsize $bs --lr $lr --epochs $epochs --exp_id $exp_id
+    end_time=$(date +%s)
+    elapsed_time=$((end_time - start_time))
+    echo "Took $elapsed_time seconds"
+done
 
 # Train shadow models
-#echo "Training shadow models"
-#start_time=$(date +%s)
-#taskset -c $cpus python $norm_tracker_path/main.py --model_start 0 --model_stop $shadow_count --gpu $gpu --dataset $dataset --arch $arch --batchsize $bs --lr $lr --epochs $epochs --shadow_count $shadow_count --exp_id $exp_id
-#end_time=$(date +%s)
-#elapsed_time=$((end_time - start_time))
-#echo "Took $elapsed_time seconds"
+echo "Training shadow models"
+start_time=$(date +%s)
+taskset -c $cpus python $norm_tracker_path/main.py --model_start 0 --model_stop $shadow_count --gpu $gpu --dataset $dataset --arch $arch --batchsize $bs --lr $lr --epochs $epochs --shadow_count $shadow_count --exp_id $exp_id
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "Took $elapsed_time seconds"
 
-### Run intermediate LiRA computation and store result
-##echo "Starting lira_intermediate"
-##start_time=$(date +%s)
-##taskset -c $cpus python $norm_tracker_path/lira_intermediate.py --exp_id $exp_id --gpu $gpu
-##end_time=$(date +%s)
-##elapsed_time=$((end_time - start_time))
-##echo "Took $elapsed_time seconds"
-#
 ## Compute LiRA for each target/dual model
 echo "Starting lira"
 start_time=$(date +%s)

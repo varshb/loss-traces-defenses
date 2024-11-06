@@ -1,7 +1,3 @@
-source /scratch/euodia/myenv/bin/activate
-log_path=/scratch/euodia/logs
-norm_tracker_path=/home/euodia/loss_traces
-
 exp_id="test"
 cpus="19-20"
 gpu=":0"

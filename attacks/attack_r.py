@@ -19,8 +19,8 @@ from data_processing.data_processing import get_no_shuffle_train_loader, get_num
 from models.model import load_model
 from results.result_processing import get_trace_reduction
 
-warnings.filterwarnings("ignore")
 
+"""Code adapted from https://github.com/privacytrustlab/ml_privacy_meter.git"""
 
 def get_all_losses(model, device, loader):
     model.eval()
@@ -86,7 +86,7 @@ def prepare_attack(target_model, args, calc_shadow_confs=False):
         sample_out_confs = {i: [] for i in args.target_trained_on}
         sample_test_confs = {i: [] for i in test_idx}
 
-
+        # Get model confidences for members and non-members
         for confs_i, i_trained_on in zip(shadow_confs, map(set, shadow_train_indices)):
             mask = np.isin(args.target_trained_on, list(i_trained_on))  # i_trained_on are original/absolute indices
             for sample_idx, conf, in_i_trained_on in zip(args.target_trained_on, confs_i, mask):
