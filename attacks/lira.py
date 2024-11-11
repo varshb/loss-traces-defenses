@@ -55,7 +55,7 @@ class LiRA:
 
         # Model and data loading
         self.model_dir = self._get_model_directory()
-        self.model, self.attack_loader = self._load_model_and_data()
+        self.model, self.attack_loaders = self._load_model_and_data()
 
     # def _parse_arguments(self) -> argparse.Namespace:
     #     """Parse command line arguments."""
@@ -95,17 +95,29 @@ class LiRA:
     def _load_model_and_data(self):
         """Load the model and attack data loader."""
         # Create attack loader
-        attack_loader = get_no_shuffle_train_loader(
-            self.args.dataset,
-            self.args.arch,
-            self.args.batchsize,
-            self.args.num_workers
-        )
+        attack_loaders = [
+            get_no_shuffle_train_loader(
+                self.args.dataset,
+                self.args.arch,
+                self.args.batchsize,
+                self.args.num_workers
+            )
+        ]
+
+        if self.args.augment:
+            attack_loaders.append(
+                get_no_shuffle_train_loader(
+                    self.args.dataset, 
+                    self.args.arch, 
+                    self.args.batchsize, 
+                    self.args.num_workers, 
+                    mirror_all=True)
+            )
 
         # Load model
         model = load_model(self.args.arch, get_num_classes(self.args.dataset)).to(self.device)
 
-        return model, attack_loader
+        return model, attack_loaders
 
     def _collect_model_confidences(self) -> tuple:
         """
@@ -114,7 +126,7 @@ class LiRA:
         Returns:
             tuple: shadow model confidences and training indices
         """
-        shadow_confs = []  # shadow_models x samples
+        shadow_confs = [[] for _ in self.attack_loaders] # augmentations x shadow_models x samples
         shadow_train_indices = []  # shadow_models x varied
 
         shadow_idx = 0
@@ -129,10 +141,14 @@ class LiRA:
             self.model.eval()
 
             # Collect model confidences
-            shadow_confs.append(get_scaled_logits(self.model, self.device, self.attack_loader))
+            for i, loader in enumerate(self.attack_loaders):
+                shadow_confs[i].append(get_scaled_logits(self.model, self.device, loader))
+
             shadow_train_indices.append(saves['trained_on_indices'])
 
             shadow_idx += 1
+
+        shadow_confs = np.array(shadow_confs).transpose(1,2,0).tolist()
 
         return shadow_confs, shadow_train_indices
 
@@ -143,9 +159,9 @@ class LiRA:
         Returns:
             tuple: in-variance, out-variance, in-means, out-means
         """
-        original_len = (len(self.attack_loader.dataset.dataset)
-                        if isinstance(self.attack_loader.dataset, Subset)
-                        else len(self.attack_loader.dataset))
+        original_len = (len(self.attack_loaders[0].dataset.dataset)
+                        if isinstance(self.attack_loaders[0].dataset, Subset)
+                        else len(self.attack_loaders[0].dataset))
 
         # Get all valid indices
         all_indices = [i for i in range(original_len)]
@@ -163,17 +179,22 @@ class LiRA:
                 else:
                     sample_out_confs[sample_idx].append(conf)
 
+        if self.args.augment:
+            f = lambda x: np.cov(x, rowvar=False)
+        else:
+            f = np.var
+
         # Compute variance (local vs global)
         if len(shadow_confs) >= 64:
-            in_var = [np.var(confs) for confs in sample_in_confs.values()]
-            out_var = [np.var(confs) for confs in sample_out_confs.values()]
+            in_var = [f(confs) for confs in sample_in_confs.values()]
+            out_var = [f(confs) for confs in sample_out_confs.values()]
         else:
-            in_var = [np.var([conf for confs in sample_in_confs.values() for conf in confs])] * len(all_indices)
-            out_var = [np.var([conf for confs in sample_out_confs.values() for conf in confs])] * len(all_indices)
+            in_var = [f([conf for confs in sample_in_confs.values() for conf in confs])] * len(all_indices)
+            out_var = [f([conf for confs in sample_out_confs.values() for conf in confs])] * len(all_indices)
 
         # Compute means
-        in_means = [sum(confs) / len(confs) for confs in sample_in_confs.values()]
-        out_means = [sum(confs) / len(confs) for confs in sample_out_confs.values()]
+        in_means = [np.mean(confs, axis=0) for confs in sample_in_confs.values()]
+        out_means = [np.mean(confs, axis=0) for confs in sample_out_confs.values()]
 
         return in_var, out_var, in_means, out_means
 
@@ -195,7 +216,7 @@ class LiRA:
         if self.checkpoint is not None:
             file_name += f'_checkpoint_after_{self.checkpoint}'
 
-        pd.DataFrame(data).to_parquet(os.path.join(dir_path, f'{file_name}.pq'))
+        torch.save(data, os.path.join(dir_path, f'{file_name}.pt'))
 
     def get_and_store_intermediate(self):
         """
@@ -234,31 +255,39 @@ class LiRA:
         target_trained_on = saves['trained_on_indices']
         self.model.eval()
 
-        target_model_confs = get_scaled_logits(self.model, self.device, self.attack_loader)
+        target_model_confs = [get_scaled_logits(self.model, self.device, loader) for loader in self.attack_loaders]
+        target_model_confs = np.array(target_model_confs).T
 
         file_name = self.exp_id
         if self.checkpoint is not None:
             file_name += f'_checkpoint_after_{self.checkpoint}'
 
-        df = pd.read_parquet(os.path.join(STORAGE_DIR, 'lira_scores/intermediate', file_name + '.pq'))
-
-        df['in_std'] = np.sqrt(df['in_var'])
-        df['out_std'] = np.sqrt(df['out_var'])
+        df = torch.load(os.path.join(STORAGE_DIR, 'lira_scores/intermediate', file_name + '.pt'))
 
         lira_scores = []
-        for i, conf in enumerate(target_model_confs):
-            l = scipy.stats.norm.pdf(conf, loc=df['in_means'][i], scale=df['in_std'][i]) + 1e-64
-            r = scipy.stats.norm.pdf(conf, loc=df['out_means'][i], scale=df['out_std'][i]) + 1e-64
-            score = l / r
-            lira_scores.append(score)
+        if self.args.augment:
+            for i, conf in enumerate(target_model_confs):
+                l = scipy.stats.multivariate_normal.pdf(conf, mean=df['in_means'][i], cov=df['in_var'][i]) + 1e-64 # TODO
+                r = scipy.stats.multivariate_normal.pdf(conf, mean=df['out_means'][i], cov=df['out_var'][i]) + 1e-64
+                score = l / r
+                lira_scores.append(score)
+        else:
+            df['in_std'] = np.sqrt(df['in_var'])
+            df['out_std'] = np.sqrt(df['out_var'])
 
-        bools = [False] * len(self.attack_loader.dataset)
-        for i, (_, _, idx) in enumerate(self.attack_loader.dataset):
+            for i, conf in enumerate(target_model_confs):
+                l = scipy.stats.norm.pdf(conf, loc=df['in_means'][i], scale=df['in_std'][i]) + 1e-64 # TODO
+                r = scipy.stats.norm.pdf(conf, loc=df['out_means'][i], scale=df['out_std'][i]) + 1e-64
+                score = l / r
+                lira_scores.append(score)
+
+        bools = [False] * len(self.attack_loaders[0].dataset)
+        for i, (_, _, idx) in enumerate(self.attack_loaders[0].dataset):
             if idx in target_trained_on:
                 bools[i] = True
 
-        original_len = len(self.attack_loader.dataset.dataset) if isinstance(self.attack_loader.dataset, Subset) else len(
-            self.attack_loader.dataset)
+        original_len = len(self.attack_loaders[0].dataset.dataset) if isinstance(self.attack_loaders[0].dataset, Subset) else len(
+            self.attack_loaders[0].dataset)
 
         all_indices = [i for i in range(original_len)]
 
@@ -294,12 +323,11 @@ def main():
     if args.checkpoint is not None:
         dir = os.path.join(dir, f'checkpoint_before_{args.checkpoint}')
     saves = torch.load(os.path.join(dir, 'shadow_0'))
-    args.excl_idxs = False
 
     try:
         args.arch = saves['arch']
         args.dataset = saves['dataset']
-        args.excl_idxs = saves['hyperparameters']['excl_idxs']
+        args.augment = saves['hyperparameters']['augment']
     except:
         print("WARNING: Could not load all settings.")
 
