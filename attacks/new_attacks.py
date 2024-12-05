@@ -229,12 +229,12 @@ class MembershipInferenceAttack:
         if self.config.checkpoint:
             file_name += f'_checkpoint_after_{self.config.checkpoint}'
 
-        stats_path = stats_dir / f'{file_name}.pq'
+        stats_path = stats_dir / f'{file_name}.pt'
 
         if not stats_path.exists():
             raise FileNotFoundError(f"No intermediate results found at {stats_path}")
 
-        return pd.read_parquet(stats_path)
+        return torch.load(stats_path)
 
     def _save_attack_results(self, scores: List[float], target_trained_on: List[int], output_dir: str):
         """Save attack results in CSV format with membership indicators."""
