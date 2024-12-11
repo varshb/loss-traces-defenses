@@ -9,8 +9,8 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.transforms import transforms
 
 from config import DATA_DIR, MODEL_DIR
-from data_processing.custom_dataset import IndexCIFAR10, IndexCIFAR100, IndexCIFAR100Coarse, \
-    IndexRESISC45
+from data_processing.custom_dataset import IndexCIFAR10, IndexCIFAR100, IndexCINIC10, \
+    IndexCIFAR100Coarse, IndexRESISC45
 
 
 def prepare_transform(dataset_name: str, arch: str, augment: bool = False, mirror_all: bool = False):
@@ -56,17 +56,44 @@ def prepare_transform(dataset_name: str, arch: str, augment: bool = False, mirro
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
 
+    # CINIC10 Transforms
+    if dataset_name == "CINIC10":
+        mean = (0.47889522, 0.47227842, 0.43047404)
+        std = (0.24205776, 0.23828046, 0.25874835)
+        if augment:
+            return transforms.Compose([
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(32, padding=4),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ])
+        elif mirror_all:
+            return transforms.Compose([
+                transforms.RandomHorizontalFlip(1),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ])
+        return transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+
     # CIFAR100 Transforms
     elif dataset_name in ["CIFAR100", "CIFAR100Coarse"]:
-        # Specific transforms for ResNet architectures
-        if 'rn' in arch or 'resnet' in arch:
+        if augment:
             return transforms.Compose([
-                transforms.Resize(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(32, padding=4),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
             ])
-
-        # Basic transform for other architectures
+        elif mirror_all:
+            return transforms.Compose([
+                transforms.RandomHorizontalFlip(1),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
+            ])
+        # Basic transform
         return transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
@@ -88,6 +115,8 @@ def get_trainset(dataset_name: str, transform: transforms.Compose) -> Dataset:
         dataset = IndexCIFAR10(root=DATA_DIR, train=True, transform=transform, download=True)
     elif dataset_name == 'CIFAR100':
         dataset = IndexCIFAR100(root=DATA_DIR, train=True, transform=transform, download=True)
+    elif dataset_name == 'CINIC10':
+        dataset = IndexCINIC10(root=DATA_DIR, partition='train', transform=transform)
     elif dataset_name == 'CIFAR100Coarse':
         dataset = IndexCIFAR100Coarse(root=DATA_DIR, train=True, transform=transform, download=True)
     elif dataset_name == 'RESISC45':
@@ -101,6 +130,8 @@ def get_testset(dataset_name: str, transform: transforms.Compose) -> Dataset:
         testset = IndexCIFAR10(root=DATA_DIR, train=False, transform=transform, download=True)
     elif dataset_name == 'CIFAR100':
         testset = IndexCIFAR100(root=DATA_DIR, train=False, transform=transform, download=True)
+    elif dataset_name == 'CINIC10':
+        testset = IndexCINIC10(root=DATA_DIR, partition='test', transform=transform)
     elif dataset_name == 'CIFAR100Coarse':
         testset = IndexCIFAR100Coarse(root=DATA_DIR, train=False, transform=transform, download=True)
     elif dataset_name == 'RESISC45':
@@ -202,6 +233,8 @@ def get_num_classes(dataset_name: str) -> int:
         num_classes = 10
     elif dataset_name == 'CIFAR100':
         num_classes = 100
+    elif dataset_name == 'CINIC10':
+        num_classes = 10
     elif dataset_name == 'CIFAR100Coarse':
         num_classes = 20
     elif dataset_name == 'RESISC45':

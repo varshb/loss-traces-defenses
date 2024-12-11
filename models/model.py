@@ -41,7 +41,21 @@ class ModelLoader:
         model = WideResNet(28, num_classes, 2)
         model = ModuleValidator.fix(model)
         return model
-
+    
+    @classmethod
+    def _load_even_wide_resnet_28_10(cls, num_classes: int) -> Module:
+        from models.wide_resnet import WideResNet
+        model = WideResNet(28, num_classes, 10)
+        model = ModuleValidator.fix(model)
+        return model
+        
+    @classmethod
+    def _load_wide_resnet_40_2(cls, num_classes: int) -> Module:
+        from models.wide_resnet import WideResNet
+        model = WideResNet(40, num_classes, 2)
+        model = ModuleValidator.fix(model)
+        return model
+    
     # Mapping of architecture names to their corresponding loader methods
     _ARCH_LOADERS = {
         'simple_convnet': _load_simple_convnet,
@@ -49,6 +63,8 @@ class ModelLoader:
         'rn-20': _load_resnet20,
         'rn-18': _load_resnet18,
         'wrn28-2': _load_wide_resnet,
+        'wrn28-10': _load_even_wide_resnet_28_10,
+        'wrn40-2': _load_wide_resnet_40_2
     }
 
     @classmethod
