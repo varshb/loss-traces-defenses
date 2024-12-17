@@ -188,7 +188,8 @@ def get_train_indices(args, dataset: Dataset, num_classes: int) -> List[int]:
         else:
             raise FileNotFoundError('Could not find target trainset to train this dual')
 
-    elif args.track_grad_norms:
+    ## For a target model
+    elif args.track_computed_loss or args.track_free_loss:
         if args.balanced_sampling:
             class_indices = {i: [] for i in range(num_classes)}
             for _, label, idx in dataset:
