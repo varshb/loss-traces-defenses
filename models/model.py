@@ -32,7 +32,7 @@ class ModelLoader:
     @classmethod
     def _load_resnet20(cls, num_classes: int) -> Tuple[Module, Module]:
         from models.resnet_cifar import resnet20
-        model = resnet20()
+        model = resnet20(num_classes=num_classes)
         return model
 
     @classmethod

@@ -115,9 +115,9 @@ class ResNet(nn.Module):
         return x
 
 
-def resnet20(k=1, inchannel=3):
+def resnet20(k=1, inchannel=3, num_classes=10):
     """Constructs a ResNet-20 model.
 
     """
-    model = ResNet(BasicBlock, [3, 3, 3], k=k, inchannel=inchannel)
+    model = ResNet(BasicBlock, [3, 3, 3], k=k, inchannel=inchannel, num_classes=num_classes)
     return model
