@@ -2,7 +2,6 @@ import os
 from typing import Tuple
 
 import torch
-from opacus.validators import ModuleValidator
 from torch.nn import Module
 from torchvision.models import resnet18, vgg11
 
@@ -21,7 +20,6 @@ class ModelLoader:
     @classmethod
     def _load_resnet18(cls, num_classes: int) -> Tuple[Module, Module]:
         model = resnet18(num_classes=num_classes)
-        model = ModuleValidator.fix(model)
         return model
 
     @classmethod
@@ -39,28 +37,24 @@ class ModelLoader:
     def _load_wide_resnet(cls, num_classes: int) -> Module:
         from models.wide_resnet import WideResNet
         model = WideResNet(28, num_classes, 2)
-        model = ModuleValidator.fix(model)
         return model
     
     @classmethod
     def _load_even_wide_resnet_28_10(cls, num_classes: int) -> Module:
         from models.wide_resnet import WideResNet
         model = WideResNet(28, num_classes, 10)
-        model = ModuleValidator.fix(model)
         return model
         
     @classmethod
     def _load_wide_resnet_40_2(cls, num_classes: int) -> Module:
         from models.wide_resnet import WideResNet
         model = WideResNet(40, num_classes, 2)
-        model = ModuleValidator.fix(model)
         return model
 
     @classmethod
     def _load_wide_resnet_40_4(cls, num_classes: int) -> Module:
         from models.wide_resnet import WideResNet
         model = WideResNet(40, num_classes, 4)
-        model = ModuleValidator.fix(model)
         return model
     
     # Mapping of architecture names to their corresponding loader methods

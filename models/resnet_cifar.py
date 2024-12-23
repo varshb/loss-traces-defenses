@@ -1,12 +1,8 @@
+# Taken/modified from https://github.com/dayu11/individual_privacy_of_DPSGD/blob/master/models/resnet_cifar.py
+
 import torch
 import torch.nn as nn
-import numpy as np
 import math
-
-from torch.nn.parameter import Parameter
-from torch.nn import functional as F
-
-from typing import Union
 
 #The ResNet models for CIFAR in https://arxiv.org/abs/1512.03385.
 
@@ -24,12 +20,12 @@ class BasicBlock(nn.Module):
         super(BasicBlock, self).__init__()
 
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.gn1 = nn.GroupNorm(gn_groups, planes, affine=False) 
-        #self.bn1 = nn.BatchNorm2d(planes, affine=False)
+        # self.gn1 = nn.GroupNorm(gn_groups, planes, affine=False)
+        self.bn1 = nn.BatchNorm2d(planes, affine=False)
         self.relu = nn.ReLU(inplace=False)
         self.conv2 = conv3x3(planes, planes)
-        self.gn2 = nn.GroupNorm(gn_groups, planes, affine=False) 
-        #self.bn2 = nn.BatchNorm2d(planes, affine=False)
+        # self.gn2 = nn.GroupNorm(gn_groups, planes, affine=False)
+        self.bn2 = nn.BatchNorm2d(planes, affine=False)
 
 
         self.downsample = downsample
@@ -38,11 +34,13 @@ class BasicBlock(nn.Module):
         identity = x
 
         out = self.conv1(x)
-        out = self.gn1(out)
+        out = self.bn1(out)
+        # out = self.gn1(out)
         out = self.relu(out)
 
         out = self.conv2(out)
-        out = self.gn2(out) 
+        # out = self.gn2(out)
+        out = self.bn2(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -62,7 +60,8 @@ class ResNet(nn.Module):
         self.num_layers = sum(layers)
         self.inplanes = 16 * k
         self.conv1 = conv3x3(inchannel, 16 * k)
-        self.gn1 = nn.GroupNorm(gn_groups, 16 * k, affine=False) 
+        self.bn1 = nn.BatchNorm2d(self.inplanes, affine=False)
+        # self.gn1 = nn.GroupNorm(gn_groups, 16 * k, affine=False)
         self.relu = nn.ReLU(inplace=False)
         self.layer1 = self._make_layer(block, 16 * k, layers[0])
         self.layer2 = self._make_layer(block, 32 * k, layers[1], stride=2)
@@ -75,7 +74,7 @@ class ResNet(nn.Module):
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
                 m.weight.data.normal_(0, math.sqrt(2. / n))
-            elif isinstance(m, nn.GroupNorm):
+            elif isinstance(m, nn.BatchNorm2d):
                 try:
                     m.weight.data.fill_(1)
                     m.bias.data.zero_()
@@ -88,7 +87,7 @@ class ResNet(nn.Module):
         if stride != 1:
             downsample = nn.Sequential(
                 nn.AvgPool2d(1, stride=stride),
-                nn.GroupNorm(gn_groups, self.inplanes, affine=False),#nn.BatchNorm2d(self.inplanes, affine=False), 
+                nn.BatchNorm2d(self.inplanes, affine=False), #nn.GroupNorm(gn_groups, self.inplanes, affine=False),
             )
 
         layers = []
@@ -101,7 +100,8 @@ class ResNet(nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.gn1(x)
+        # x = self.gn1(x)
+        x = self.bn1(x)
         x = self.relu(x)
 
         x = self.layer1(x)
