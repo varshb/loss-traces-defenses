@@ -54,7 +54,7 @@ class Trainer:
             losses = self.loss_func_sample(outputs, targets)
             all_losses.extend(losses.tolist())
         # all_losses = torch.cat(all_losses, dim=0)
-
+        model.train()
         return all_losses#.tolist()
 
 
