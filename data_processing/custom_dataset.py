@@ -1,5 +1,6 @@
 import torchgeo.datasets
 import torchvision
+import os
 from PIL import Image
 
 
@@ -30,6 +31,43 @@ class IndexCIFAR100(torchvision.datasets.CIFAR100):
         if self.target_transform is not None:
             target = self.target_transform(target)
         return img, target, index
+
+class IndexCINIC10(torchvision.datasets.VisionDataset):
+    classes=["airplane",
+     "automobile",
+     "bird",
+     "cat",
+     "deer",
+     "dog",
+     "frog",
+     "horse",
+     "ship",
+     "truck"]
+
+    def __init__(self, 
+                 root: str = '',
+                 partition: str = 'train',
+                 transform = None):
+        
+
+        super().__init__(root, transforms=None, transform=None, target_transform=None)
+        self.transform = transform
+        self.data = torchvision.datasets.ImageFolder(os.path.join('/scratch/joseph/data', 'cinic-10', partition)) # TODO
+
+    def __getitem__(self, index):
+        img, target = self.data[index]
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target, index
+
+    def __len__(self):
+        return len(self.data)
+                   
 
 class IndexCIFAR100Coarse(IndexCIFAR100):
     coarse_labels = [4, 1, 14, 8, 0, 6, 7, 7, 18, 3,
