@@ -14,10 +14,23 @@ import torch
 from torch.nn import Module
 from torch.utils.data import Subset, DataLoader
 
-from config import MODEL_DIR, STORAGE_DIR
 from data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
 from models.model import load_model
 
+# LOCAL_DIR = '/home/joseph/rds/home/loss_traces' # path to this folder
+# # paths to store stuff...
+# STORAGE_DIR = '/home/joseph/rds/home/'
+# MODEL_DIR = '/home/joseph/rds/home/trained_models/'
+# DATA_DIR = '/home/joseph/rds/ephemeral/data/'
+
+# LOCAL_DIR = '/data_2/euodia/loss_traces' # path to this folder
+# # paths to store stuff...
+# STORAGE_DIR = '/data_2/euodia/'
+
+# MY_STORAGE_DIR = '/data_2/euodia/'
+MY_SECONDARY_STORAGE_DIR = '/home/euodia/rds/home/'
+MODEL_DIR = '/home/joseph/rds/home/trained_models/'
+# DATA_DIR = '/data_2/euodia/data'
 
 @dataclass
 class AttackConfig:
@@ -26,6 +39,7 @@ class AttackConfig:
     checkpoint: Optional[str]
     arch: str
     dataset: str
+    attack: str
     augment: bool =  False
     batchsize: int = 500
     num_workers: int = 8
@@ -34,38 +48,52 @@ class AttackConfig:
 
 class ModelConfidenceExtractor:
     def get_logits(self, model: Module, device: torch.device, loader: DataLoader):
-        return self._get_metrics(model, device, loader,  metric="logits")
+        return self._get_metrics(model, device, loader,  metrics=["logits"])[1]
     def get_scaled_logits(self, model: Module, device: torch.device, loader: DataLoader):
-        return self._get_metrics(model, device, loader, metric="logits", scale=True)
+        return self._get_metrics(model, device, loader, metrics=["scaled_logits"])[2]
+    def get_target_logits(self, model: Module, device: torch.device, loader: DataLoader):
+        return self._get_metrics(model, device, loader, metrics=["target_logits"])[3]
     def get_losses(self,  model: Module, device: torch.device, loader: DataLoader):
-        return self._get_metrics(model, device, loader, metric="losses")
+        return self._get_metrics(model, device, loader, metrics=["losses"])[0]
+    # def get_all_metrics(self, model: Module, device: torch.device, loader: DataLoader):
+    #     return self._get_metrics(model, device, loader, metrics=["losses", "logits", "scaled_logits"])
 
     @staticmethod
-    def _get_metrics(model: Module, device: torch.device, loader: DataLoader, scale=False, metric="losses") -> List[float]:
+    def _get_metrics(model: Module, device: torch.device, loader: DataLoader, metrics=["losses", "logits", "scaled_logits"]) -> List[float]:
         """Extract metrics from model predictions."""
         model.eval()
-        metrics = []
+
+        losses = []
+        logits = []
+        scaled_logits = []
+        target_logits = []
 
         with torch.no_grad():
             for inputs, targets, _indices in loader:
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = model(inputs).squeeze(-1).squeeze(-1)
+                pred_confs, _ = torch.max(outputs, dim=1)
+                target_confs = outputs[torch.arange(outputs.shape[0]), targets]
 
-                if metric == "losses":
+                if "losses" in metrics:
                     loss_func_sample = torch.nn.CrossEntropyLoss(reduction='none')
                     m = loss_func_sample(outputs, targets)
+                    losses.extend(m.tolist())
 
-                elif metric == "logits":
+                if "logits" in metrics:
+                    logits.extend(pred_confs.tolist())
+                #
+                if "target_logits" in metrics:
+                    target_logits.extend(target_confs.tolist())
+
+
+                if "scaled_logits" in metrics:
+                    outputs[torch.arange(outputs.shape[0]), targets] = float('-inf')
                     pred_confs, _ = torch.max(outputs, dim=1)
-                    m = pred_confs
+                    m = target_confs - pred_confs
+                    scaled_logits.extend(m.tolist())
 
-                    if scale:
-                        target_confs = outputs[torch.arange(outputs.shape[0]), targets]
-                        m = target_confs - pred_confs
-
-                metrics.extend(m.tolist())
-
-        return metrics
+        return losses, logits, scaled_logits, target_logits
 
 class MembershipInferenceAttack:
     def __init__(self, config: AttackConfig):
@@ -111,9 +139,23 @@ class MembershipInferenceAttack:
 
         return model, attack_loaders
 
-    def _collect_shadow_model_data(self, method) -> Tuple[List[List[float]], List[List[int]]]:
-        """Collect confidence scores from all shadow models."""
-        shadow_confs = [[] for _ in self.attack_loaders] # augmentations x shadow_models x samples
+    def _collect_shadow_model_data(self, metrics=["losses", "logits", "scaled_logits"]) -> Tuple[
+        Dict[str, List[List[float]]], List[List[int]]]:
+        """Collect all metrics from shadow models in a single pass.
+
+        Args:
+            metrics: List of metrics to collect (defaults to all)
+
+        Returns:
+            Tuple containing:
+            - Dictionary of metric arrays for each metric type
+            - List of training indices for each shadow model
+        """
+        # Initialize metric storage for each augmentation
+        shadow_metrics = {
+            metric: [[] for _ in self.attack_loaders]
+            for metric in metrics
+        }
         shadow_train_indices = []
 
         shadow_idx = 0
@@ -126,15 +168,28 @@ class MembershipInferenceAttack:
             self.model.load_state_dict(saves['model_state_dict'])
 
             for i, loader in enumerate(self.attack_loaders):
-                shadow_confs[i].append(method(self.model, self.device, loader))
+                res = self.extractor._get_metrics(
+                    self.model,
+                    self.device,
+                    loader,
+                    metrics=metrics
+                )
+
+                # Store each metric type
+                metric_values = res
+                for metric_name, value in zip(metrics, metric_values):
+                    if value:  # Only store non-empty results
+                        shadow_metrics[metric_name][i].append(value)
 
             shadow_train_indices.append(saves['trained_on_indices'])
-
+            print(f"Computed metrics for shadow {shadow_idx}")
             shadow_idx += 1
 
-        shadow_confs = np.array(shadow_confs).transpose(1, 2, 0).tolist()
+        # Transpose each metric array
+        for metric in metrics:
+            shadow_metrics[metric] = np.array(shadow_metrics[metric]).transpose(1, 2, 0).tolist()
 
-        return shadow_confs, shadow_train_indices
+        return shadow_metrics, shadow_train_indices
 
     def _compute_statistics(self, shadow_confs: List[List[float]],
                             shadow_train_indices: List[List[int]]) -> Dict:
@@ -178,41 +233,38 @@ class MembershipInferenceAttack:
             'out_means': out_means
         }
 
-    def save_intermediate_results(self, stats: Dict, output_dir: str = 'logits/intermediate'):
+    def save_intermediate_results(self, stats: Dict, output_dir: str = 'logits_intermediate'):
         """Save intermediate statistical results."""
-        save_dir = Path(STORAGE_DIR) / output_dir
+        save_dir = Path(MY_SECONDARY_STORAGE_DIR) / output_dir
         save_dir.mkdir(parents=True, exist_ok=True)
 
         file_name = self.config.exp_id
         if self.config.checkpoint:
             file_name += f'_checkpoint_after_{self.config.checkpoint}'
 
-        torch.save(stats, os.path.join(output_dir, f'{file_name}.pt'))
+        torch.save(stats, os.path.join(save_dir, f'{file_name}.pt'))
 
     def compute_intermediate_results(self):
-        """Compute and save intermediate statistical results."""
-        print("Computing intermediate results...")
+        """Compute and save intermediate statistical results in a single pass."""
+        print("Computing all metrics...")
+
         start_time = time.time()
 
-        metric_dict = {"logits": self.extractor.get_logits,
-                       "scaled_logits": self.extractor.get_scaled_logits,
-                       "losses":self.extractor.get_losses}
+        # Collect all metrics in one pass
+        metrics = ["losses", "logits", "scaled_logits", "target_logits"]
+        shadow_metrics, shadow_indices = self._collect_shadow_model_data(metrics)
 
-        for i in metric_dict.keys():
-            shadow_confs, shadow_indices = self._collect_shadow_model_data(metric_dict[i])
-            logits_time = time.time()
+        # Compute and save statistics for each metric type
+        for metric_name, metric_data in shadow_metrics.items():
+            print(f"Computing statistics for {metric_name}...")
+            stats = self._compute_statistics(metric_data, shadow_indices)
+            self.save_intermediate_results(stats, output_dir=f'{metric_name}_intermediate')
 
-            stats = self._compute_statistics(shadow_confs, shadow_indices)
-            compute_time = time.time()
-
-            self.save_intermediate_results(stats, output_dir='{i}_values/intermediate')
-
-
+        end_time = time.time()
 
         print(f"Performance Timings:")
-        print(f"Model loading: {logits_time - start_time:.2f}s")
-        print(f"Logit computation: {compute_time - logits_time:.2f}s")
-        print(f"Statistical analysis: {time.time() - compute_time:.2f}s")
+        print(f"Total computation time: {end_time - start_time:.2f}s")
+        print(f"Finished stats")
 
     def _load_intermediate_stats(self, metric) -> pd.DataFrame:
         """Load intermediate statistical results from saved files.
@@ -223,7 +275,7 @@ class MembershipInferenceAttack:
         Raises:
             FileNotFoundError: If intermediate results file doesn't exist
         """
-        stats_dir = Path(STORAGE_DIR) / f'{metric}_values/intermediate'
+        stats_dir = Path(MY_SECONDARY_STORAGE_DIR) / f'{metric}_intermediate'
 
         file_name = self.config.exp_id
         if self.config.checkpoint:
@@ -236,11 +288,11 @@ class MembershipInferenceAttack:
 
         return torch.load(stats_path)
 
-    def _save_attack_results(self, scores: List[float], target_trained_on: List[int], output_dir: str):
+    def _save_attack_results(self, scores: List[float], target_trained_on: List[int], output_dir: str, **kwargs):
         """Save attack results in CSV format with membership indicators."""
         # Create membership boolean array
-        bools = [False] * len(self.attack_loader.dataset)
-        for i, (_, _, idx) in enumerate(self.attack_loader.dataset):
+        bools = [False] * len(self.attack_loaders[0].dataset)
+        for i, (_, _, idx) in enumerate(self.attack_loaders[0].dataset):
             if idx in target_trained_on:
                 bools[i] = True
 
@@ -253,7 +305,7 @@ class MembershipInferenceAttack:
         all_indices = list(range(original_len))
 
         # Create save directory
-        save_dir = Path(STORAGE_DIR) / output_dir
+        save_dir = Path(MY_SECONDARY_STORAGE_DIR) / f"{output_dir}_scores"
         save_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate result filename
@@ -268,11 +320,18 @@ class MembershipInferenceAttack:
             fullpath = Path(str(fullpath) + "_")
 
         # Save results
-        pd.DataFrame({
+        results = pd.DataFrame({
             f'{output_dir.rstrip("s")}_score': scores,
             'target_trained_on': bools,
             'og_idx': all_indices
-        }).set_index('og_idx').to_csv(fullpath)
+        }).set_index('og_idx')
+
+        if kwargs:
+            extra =  pd.DataFrame(kwargs)
+            results = pd.concat([results, extra], axis=1)
+
+
+        results.to_csv(fullpath)
 
 
 class LiRAAttack(MembershipInferenceAttack):
@@ -284,7 +343,9 @@ class LiRAAttack(MembershipInferenceAttack):
         target_indices = saves['trained_on_indices']
 
         # Get target model confidences
-        target_confs = self.extractor.get_scaled_logits(self.model, self.device, self.attack_loader)
+        # target_confs = self.extractor.get_scaled_logits(self.model, self.device, self.attack_loaders)
+        target_confs = [self.extractor.get_scaled_logits(self.model, self.device, loader) for loader in self.attack_loaders]
+        target_confs = np.array(target_confs).T
 
         # Load intermediate results
         stats_df = self._load_intermediate_stats("scaled_logits")
@@ -297,21 +358,21 @@ class LiRAAttack(MembershipInferenceAttack):
 
     def _compute_lira_scores(self, target_confs: List[float], stats_df: pd.DataFrame) -> List[float]:
         """Compute LiRA scores using statistical analysis."""
-        stats_df['in_std'] = np.sqrt(stats_df['in_var'])
-        stats_df['out_std'] = np.sqrt(stats_df['out_var'])
 
         scores = []
         if self.config.augment:
             for i, conf in enumerate(target_confs):
                 l = scipy.stats.multivariate_normal.pdf(conf, mean=stats_df['in_means'][i],
-                                                        cov=stats_df['in_var'][i]) + 1e-64  # TODO
-                r = scipy.stats.multivariate_normal.pdf(conf, mean=stats_df['out_means'][i], cov=stats_df['out_var'][i]) + 1e-64
+                                                        cov=stats_df['in_var'][i],  allow_singular=True) + 1e-64  # TODO
+                r = scipy.stats.multivariate_normal.pdf(conf, mean=stats_df['out_means'][i], cov=stats_df['out_var'][i],  allow_singular=True) + 1e-64
                 score = l / r
                 scores.append(score)
         else:
+            stats_df['in_std'] = np.sqrt(stats_df['in_var'])
+            stats_df['out_std'] = np.sqrt(stats_df['out_var'])
             for i, conf in enumerate(target_confs):
-                l = scipy.stats.norm.pdf(conf, loc=stats_df['in_means'][i], scale=stats_df['in_std'][i]) + 1e-64  # TODO
-                r = scipy.stats.norm.pdf(conf, loc=stats_df['out_means'][i], scale=stats_df['out_std'][i]) + 1e-64
+                l = scipy.stats.norm.pdf(conf, loc=stats_df['in_means'][i], scale=stats_df['in_std'][i],  allow_singular=True) + 1e-64  # TODO
+                r = scipy.stats.norm.pdf(conf, loc=stats_df['out_means'][i], scale=stats_df['out_std'][i],  allow_singular=True) + 1e-64
                 score = l / r
                 scores.append(score)
 
@@ -320,7 +381,7 @@ class LiRAAttack(MembershipInferenceAttack):
 
 
 class RMIAAttack(MembershipInferenceAttack):
-    def run(self, gamma: float = 1.0):
+    def run(self, gamma: float = 2.0):
         """Execute RMIA (Relative Membership Inference Attack)."""
         # Load target model
         saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
@@ -328,30 +389,36 @@ class RMIAAttack(MembershipInferenceAttack):
         target_indices = saves['trained_on_indices']
 
         # Get confidences and compute ratios
-        target_confs = self.extractor.get_logits(self.model, self.device, self.attack_loader)
+        target_confs = self.extractor.get_logits(self.model, self.device, self.attack_loaders[0])
         stats_df = self._load_intermediate_stats("logits")
 
         # Compute RMIA scores
         rmia_scores = self._compute_rmia_scores(target_confs, target_indices, stats_df, gamma)
 
         # Save results
-        self._save_attack_results(rmia_scores, target_indices, 'rmia')
+        self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}')
 
     def _compute_rmia_scores(self, target_confs: List[float], target_indices: List[int],
                              stats_df: pd.DataFrame, gamma: float) -> List[float]:
         """Compute RMIA scores using relative likelihood analysis."""
-        test_indices = [i for i in range(self.dataset_size) if i not in target_indices]
-        ratio_z = [target_confs[z] / np.mean(stats_df['out_conf'][z]) for z in test_indices]
+        test_indices = list(set(range(self.dataset_size)) - set(target_indices))
+        out_conf = [[x[0] for x in dists] for k, dists in stats_df['out_conf'].items()]
+        in_conf = [[x[0] for x in dists] for k, dists in stats_df['in_conf'].items()]
+
+        ratio_z = [target_confs[z] / np.mean(out_conf[z]) for z in test_indices]
 
         scores = []
+
         for i, conf in enumerate(target_confs):
-            ratio_x = conf / (np.mean(stats_df['in_conf'][i] + stats_df['out_conf'][i]) / 2)
+            pr_x = (np.sum(in_conf[i]) + np.sum(out_conf[i])) / (2 * len(out_conf[i]))
+            ratio_x = conf / pr_x
             scores.append(sum((ratio_x / r_z) > gamma for r_z in ratio_z))
 
         return scores
 
 class AttackR(MembershipInferenceAttack):
-    def run(self, alphas):
+    # np.linspace(0, 1, 100)
+    def run(self, alphas=np.logspace(-5, 0, 100)):
         """Execute RMIA (Relative Membership Inference Attack)."""
         # Load target model
         saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
@@ -359,14 +426,17 @@ class AttackR(MembershipInferenceAttack):
         target_indices = saves['trained_on_indices']
 
         # Get confidences and compute ratios
-        target_confs = self.extractor.get_losses(self.model, self.device, self.attack_loader)
+        target_confs = self.extractor.get_losses(self.model, self.device, self.attack_loaders[0])
         stats_df = self._load_intermediate_stats("losses")
 
         # Save results
         for alpha in alphas:
             # Compute AttackR scores
-            attackr_scores = self._compute_attackr_scores(target_confs, target_indices, stats_df, alpha)
-            self._save_attack_results(attackr_scores, target_indices, 'attackr')
+            attackr_scores, thresholds, preds = self._compute_attackr_scores(target_confs, target_indices, stats_df, alpha)
+
+        self._save_attack_results(attackr_scores, target_indices, f'attackr_{alpha}', thresholds=thresholds, preds=preds)
+
+
 
     @staticmethod
     def calculate_loss_threshold(alpha, distribution):
@@ -402,19 +472,26 @@ class AttackR(MembershipInferenceAttack):
     def _compute_attackr_scores(self, target_confs: List[float], target_indices: List[int],
                              stats_df: pd.DataFrame, alpha: List[float]) -> List[float]:
         """Compute RMIA scores using relative likelihood analysis."""
-        target_confs = self.extractor.get_logits(self.model, self.device, self.attack_loader)
-
         # for alpha in alphas:
         train_thresholds = []
         train_percs = []
 
         threshold_func = self.calculate_loss_threshold if alpha < 0.001 else self.linear_itp_threshold_func
 
-        for point_idx, point_loss_dist in enumerate(target_confs):
-            train_thresholds.append(threshold_func(alpha=alpha, distribution=point_loss_dist))
-            train_percs.append(stats.percentileofscore(point_loss_dist, stats_df['out_conf'][point_idx]))
+        out_conf = [[x[0] for x in dists] for k,dists in stats_df['out_conf'].items()]
 
-        return train_percs
+        for point_idx, point_loss_dist in enumerate(out_conf):
+            train_thresholds.append(threshold_func(alpha=alpha, distribution=point_loss_dist))
+            train_percs.append(stats.percentileofscore(point_loss_dist, target_confs[point_idx]))
+
+        preds = []
+        for loss, threshold in zip(target_confs, train_thresholds):
+            if loss <= threshold:
+                preds.append(1)
+            else:
+                preds.append(0)
+
+        return train_percs, train_thresholds, preds
 
 
 
@@ -452,6 +529,8 @@ def parse_args() -> AttackConfig:
         checkpoint=args.checkpoint,
         arch=args.arch,
         dataset=args.dataset,
+        attack=args.attack,
+        ##TODO: Put back augmentation
         augment=args.augment,
         batchsize=args.batchsize,
         num_workers=args.num_workers,
@@ -473,6 +552,8 @@ def main():
     # Compute intermediate results if they don't exist
     attack.compute_intermediate_results()
     attack.run()
+    # attack.run(alphas=np.logspace(-5, 0, 100))
+    # attack.run(alphas=np.linspace(0, 1, 100))
 
 
 if __name__ == "__main__":
