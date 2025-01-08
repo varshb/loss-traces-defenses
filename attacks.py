@@ -14,23 +14,11 @@ import torch
 from torch.nn import Module
 from torch.utils.data import Subset, DataLoader
 
+from config import MODEL_DIR, STORAGE_DIR
 from data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
 from models.model import load_model
 
-# LOCAL_DIR = '/home/joseph/rds/home/loss_traces' # path to this folder
-# # paths to store stuff...
-# STORAGE_DIR = '/home/joseph/rds/home/'
-# MODEL_DIR = '/home/joseph/rds/home/trained_models/'
-# DATA_DIR = '/home/joseph/rds/ephemeral/data/'
 
-# LOCAL_DIR = '/data_2/euodia/loss_traces' # path to this folder
-# # paths to store stuff...
-# STORAGE_DIR = '/data_2/euodia/'
-
-# MY_STORAGE_DIR = '/data_2/euodia/'
-MY_SECONDARY_STORAGE_DIR = '/home/euodia/rds/home/'
-MODEL_DIR = '/home/joseph/rds/home/trained_models/'
-# DATA_DIR = '/data_2/euodia/data'
 
 @dataclass
 class AttackConfig:
@@ -235,7 +223,7 @@ class MembershipInferenceAttack:
 
     def save_intermediate_results(self, stats: Dict, output_dir: str = 'logits_intermediate'):
         """Save intermediate statistical results."""
-        save_dir = Path(MY_SECONDARY_STORAGE_DIR) / output_dir
+        save_dir = Path(STORAGE_DIR) / output_dir
         save_dir.mkdir(parents=True, exist_ok=True)
 
         file_name = self.config.exp_id
@@ -275,7 +263,7 @@ class MembershipInferenceAttack:
         Raises:
             FileNotFoundError: If intermediate results file doesn't exist
         """
-        stats_dir = Path(MY_SECONDARY_STORAGE_DIR) / f'{metric}_intermediate'
+        stats_dir = Path(STORAGE_DIR) / f'{metric}_intermediate'
 
         file_name = self.config.exp_id
         if self.config.checkpoint:
@@ -305,7 +293,7 @@ class MembershipInferenceAttack:
         all_indices = list(range(original_len))
 
         # Create save directory
-        save_dir = Path(MY_SECONDARY_STORAGE_DIR) / f"{output_dir}_scores"
+        save_dir = Path(STORAGE_DIR) / f"{output_dir}_scores"
         save_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate result filename
