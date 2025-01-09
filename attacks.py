@@ -18,8 +18,6 @@ from config import MODEL_DIR, STORAGE_DIR
 from data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
 from models.model import load_model
 
-
-
 @dataclass
 class AttackConfig:
     exp_id: str
@@ -367,7 +365,7 @@ class LiRAAttack(MembershipInferenceAttack):
         return scores
 
 
-
+## TODO: They do a thingy to compute value of gamma with a holdout set. Set to 2 currently since thats what the paper uses
 class RMIAAttack(MembershipInferenceAttack):
     def run(self, gamma: float = 2.0):
         """Execute RMIA (Relative Membership Inference Attack)."""
@@ -404,6 +402,7 @@ class RMIAAttack(MembershipInferenceAttack):
 
         return scores
 
+## TODO: There are point-calibrated thresholds. So each point has it's own and using roc_auc builtin won't work
 class AttackR(MembershipInferenceAttack):
     # np.linspace(0, 1, 100)
     def run(self, alphas=np.logspace(-5, 0, 100)):
@@ -421,8 +420,7 @@ class AttackR(MembershipInferenceAttack):
         for alpha in alphas:
             # Compute AttackR scores
             attackr_scores, thresholds, preds = self._compute_attackr_scores(target_confs, target_indices, stats_df, alpha)
-
-        self._save_attack_results(attackr_scores, target_indices, f'attackr_{alpha}', thresholds=thresholds, preds=preds)
+            self._save_attack_results(attackr_scores, target_indices, f'attackr_{alpha}', thresholds=thresholds, preds=preds)
 
 
 
