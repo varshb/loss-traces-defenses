@@ -18,8 +18,6 @@ from config import MODEL_DIR, STORAGE_DIR
 from data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
 from models.model import load_model
 
-MODEL_DIR = '/home/joseph/rds/home/trained_models'
-
 @dataclass
 class AttackConfig:
     exp_id: str
@@ -539,8 +537,8 @@ def main():
 
     # Compute intermediate results if they don't exist
     attack.compute_intermediate_results()
-    # attack.run()
-    attack.run(alphas=np.logspace(-5, 0, 100))
+    attack.run()
+    # attack.run(alphas=np.logspace(-5, 0, 100))
     # attack.run(alphas=np.linspace(0, 1, 100))
 
 
