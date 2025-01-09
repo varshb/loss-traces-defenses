@@ -8,9 +8,10 @@ import pandas as pd
 import torch
 from scipy.stats import stats
 from sklearn import metrics
+from matplotlib import pyplot as plt
+from sklearn.metrics import auc, confusion_matrix
 
-from config import MODEL_DIR, STORAGE_DIR, MY_STORAGE_DIR
-
+from config import MODEL_DIR, STORAGE_DIR, MY_STORAGE_DIR, MY_SECONDARY_STORAGE_DIR
 
 
 def _is_default_index(df: pd.DataFrame) -> bool:
@@ -94,6 +95,9 @@ def _apply_reduction(traces: pd.DataFrame, reduction: str) -> pd.Series:
     pd.Series
         Reduced data
     """
+    if not reduction:
+        return traces
+
     reduction_methods = {
         'mean': _reduction_mean,
         'slope': _reduction_slope,
@@ -161,49 +165,128 @@ def _reduction_reduce_by_x(traces: pd.DataFrame) -> pd.Series:
 def get_trace_reduction(exp_id: str, target_id: str = None, first: int = None, last: int = None, trace_type="losses", reduction="mean"):
     base_name = exp_id + '_' + target_id if target_id else exp_id
     path = os.path.join(STORAGE_DIR, trace_type, base_name + '.pq')
+
     return get_reduced_data(path, first, last, reduction=reduction)
 
 
 def get_lira_scores(exp_id: str, target_id: str = 'target'):
-    return pd.read_csv(os.path.join(STORAGE_DIR, 'lira_scores', exp_id + '_' + target_id))
+    return pd.read_csv(os.path.join(MY_STORAGE_DIR, 'lira_scores', exp_id + '_' + target_id))
 
 
 def get_attackr_scores(exp_id: str, target_id: str = 'target'):
-     path = [f for f in glob(f'{MY_STORAGE_DIR}/{target_id}/attack_results_*')][0]
-     device = "cpu"
-     try:
-         with np.load(path, allow_pickle=True) as data:
-             # normalise train percentiles
-             train_percs = data["train_percs"][()]
-             test_percs = data["test_percs"][()]
+    path = [f for f in glob(f'{MY_STORAGE_DIR}/attackr_*/{exp_id}_{target_id}')][0]
 
-             train_percs = pd.Series({i: n/100 for i,n in train_percs.items()})
-             test_percs = pd.Series({i: n/100 for i,n in test_percs.items()})
+    try:
+         data = pd.read_csv(path)
 
-         dir = os.path.join(MODEL_DIR, exp_id)
+         attack_score = list(filter(lambda x: x.startswith('attackr'), data.columns))
 
-         saves = torch.load(os.path.join(dir, target_id), map_location=device)
+         # Get those columns from the dataframe
+         train_percs = data[attack_score]
+         train_percs = train_percs.apply(lambda x: x / 100)
 
-         train_idx = saves["trained_on_indices"]
-         test_idx = list(set(range(50000)) - set(train_idx))
-
-         train_percs.index = train_idx
-         test_percs.index = test_idx
-
-         return pd.concat([train_percs, test_percs]).sort_index()
-     except Exception as e:
+         return train_percs.sort_index()
+    except Exception as e:
          print(e)
 
+def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.linspace(0,1,100)):
 
-def print_overall_tpr_at_fpr(df: pd.DataFrame):
-    fpr, tpr, _thresholds = metrics.roc_curve(df['target_trained_on'], df['lira_score'], drop_intermediate=False)
-    levels = [0.1, 0.01, 0.001, 0.0001]
-    print("AUC: ",metrics.roc_auc_score(df['target_trained_on'], df['lira_score']))
+    try:
+        alphas = sorted(alphas)
+
+        tpr_values = []
+        fpr_values = []
+
+        for alpha in alphas:
+            path = [f for f in glob(f'{MY_STORAGE_DIR}/attackr_{alpha}_*/{exp_id}_{target_id}')][0]
+            data = pd.read_csv(path)
+
+            data['pred'] = data.apply(lambda x: 1 if x[f"attackr_{str(alpha)}_score"] <= x["thresholds"] else 0, axis=1)
+
+            tn, fp, fn, tp = confusion_matrix(data['target_trained_on'].astype(int), data['pred']).ravel()
+            tpr = tp / (tp + fn)
+            fpr = fp / (fp + tn)
+            tpr_values.append(tpr)
+            fpr_values.append(fpr)
+
+        tpr_values.insert(0, 0)
+        fpr_values.insert(0, 0)
+        tpr_values.append(1)
+        fpr_values.append(1)
+
+        auc_value = round(auc(x=fpr_values, y=tpr_values), 5)
+
+        fig, ax = plt.subplots()
+        ax.plot(fpr_values,
+                tpr_values,
+                linewidth=2.0,
+                color='b',
+                label=f'AUC = {auc_value}')
+        ax.set_xlabel("FPR")
+        ax.set_ylabel("TPR")
+        ax.set_ylim([0.0, 1.1])
+        ax.legend(loc='lower right')
+    except Exception as e:
+         print(e)
+
+def get_rmia_scores(exp_id: str, target_id: str = 'target'):
+    path = [f for f in glob(f'{MY_SECONDARY_STORAGE_DIR}/rmia_2.0_scores/{exp_id}_{target_id}')][0]
+
+    try:
+         return pd.read_csv(path)
+    except Exception as e:
+         print(e)
+
+def print_overall_tpr_at_fpr(df: pd.DataFrame, target_col="lira_score"):
+    if target_col == "attackr_score":
+        df = df.sort_values(target_col, ascending=True)
+        df[target_col] =  1-df[target_col]
+    fpr, tpr, _thresholds = metrics.roc_curve(df['target_trained_on'], df[target_col], drop_intermediate=False)
+    plt.plot(fpr, tpr)
+    plt.xlim(left=0)
+    plt.xscale('log')
+
+    levels = [0.1, 0.01, 0.001, 0.0001, 0.00001]
+    print("AUC: ",metrics.roc_auc_score(df['target_trained_on'], df[target_col]))
     for level in levels:
         low = tpr[np.where(fpr<=level)[0][-1]]
         print("TPR@FPR="+str(level), low)
+
 
 def get_overall_tpr_at_fpr(df: pd.DataFrame, query_fpr: float, target_col="lira_score"):
     fpr, tpr, _thresholds = metrics.roc_curve(df['target_trained_on'], df[target_col], drop_intermediate=False)
     return tpr[np.where(fpr<=query_fpr)[0][-1]]
 
+
+# Assign each sample to equally sized bins based on similar `binning_col` values
+def create_bins(df: pd.DataFrame, bins: int = 100, bin_separately: bool = True, binning_col: str = 'avg_norm') -> pd.Series:
+
+    if bin_separately:
+        members = df[df['target_trained_on'] == True].copy()
+        members['bin'] = pd.qcut(members[binning_col].rank(method='first'), bins, labels=False)
+
+        non_members = df[df['target_trained_on'] == False].copy()
+        non_members['bin'] = pd.qcut(non_members[binning_col].rank(method='first'), bins, labels=False)
+
+        result = pd.concat([members, non_members]).sort_index()['bin']
+    else:
+        result = pd.qcut(df[binning_col], bins, labels=False)
+
+    return result
+
+
+
+if __name__ == "__main__":
+    # main()
+    exp_id = "WRN40_4_CIFAR100"
+    # exp_id = "WRN28_10_CIFAR100"
+    # exp_id =  "WRN28_2_CINIC10"
+    df = get_lira_scores(exp_id)
+    df["rmia_score"] = get_rmia_scores(exp_id)
+    df["attackr_score"] = get_attackr_scores(exp_id)
+    plt.figure()
+    # print_overall_tpr_at_fpr(df, "lira_score")
+    # print_overall_tpr_at_fpr(df, "rmia_score")
+    # print_overall_tpr_at_fpr(df, "attackr_score")
+    # plt.show()
+    plot_attackr_roc(exp_id)
