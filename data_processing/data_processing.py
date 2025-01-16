@@ -28,6 +28,9 @@ def prepare_transform(dataset_name: str, arch: str, augment: bool = False, mirro
     Raises:
         NotImplementedError: If the dataset is not supported
     """
+    if augment and mirror_all:
+        raise ValueError("Both augment and mirror_all are set to True. Only one should be set at a time")
+
     # CIFAR10 Transforms
     if dataset_name == "CIFAR10":
         # Specific transforms for ResNet architectures
@@ -148,6 +151,7 @@ def get_no_shuffle_train_loader(
         mirror_all: bool = False
         ) -> DataLoader:
     transform = prepare_transform(dataset, arch, mirror_all=mirror_all)
+    # transform = prepare_transform(dataset, arch, mirror_all)
     attackset = get_trainset(dataset, transform)
     return DataLoader(attackset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
 
