@@ -1,0 +1,9 @@
+axes.prop_cycle: cycler('color', ['0072B2', '009E73', 'D55E00', 'CC79A7', 'F0E442', '56B4E9'])
+axes.grid: False
+axes.xmargin: 0
+axes.ymargin: 0
+axes.labelsize: 14
+lines.linewidth : 2
+xtick.labelsize : 12
+ytick.labelsize : 12
+patch.facecolor: C0

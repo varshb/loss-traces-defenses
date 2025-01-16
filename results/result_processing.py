@@ -9,7 +9,7 @@ import torch
 from scipy.stats import stats
 from sklearn import metrics
 from matplotlib import pyplot as plt
-from sklearn.metrics import auc, confusion_matrix
+from sklearn.metrics import auc, confusion_matrix, roc_auc_score
 
 from config import MODEL_DIR, STORAGE_DIR, MY_STORAGE_DIR, MY_SECONDARY_STORAGE_DIR
 
@@ -36,7 +36,7 @@ def get_reduced_data(
         first: Optional[int] = None,
         last: Optional[int] = None,
         reduction: Literal['mean', 'slope', 'iqr', 'mid-end', 'delta/mid',
-        'reduce-by-x', 'norm1', 'norm2', 'norm3', 'norm4', 'inf'] = 'mean'
+        'reduce-by-x', 'norm1', 'norm2', 'norm3', 'norm4', 'inf'] = None
 ) -> pd.Series:
     """
     Read and process data from a Parquet file with various reduction methods.
@@ -169,27 +169,30 @@ def get_trace_reduction(exp_id: str, target_id: str = None, first: int = None, l
     return get_reduced_data(path, first, last, reduction=reduction)
 
 
-def get_lira_scores(exp_id: str, target_id: str = 'target'):
-    return pd.read_csv(os.path.join(MY_STORAGE_DIR, 'lira_scores', exp_id + '_' + target_id))
+def get_lira_scores(exp_id: str, target_id: str = 'target', return_full_df=True):
+
+    df = pd.read_csv(os.path.join(MY_STORAGE_DIR, 'lira_scores', exp_id + '_' + target_id))
+    if return_full_df:
+        return df
+    return df['lira_score'].sort_index()
 
 
-def get_attackr_scores(exp_id: str, target_id: str = 'target'):
-    path = [f for f in glob(f'{MY_STORAGE_DIR}/attackr_*/{exp_id}_{target_id}')][0]
+def get_attackr_scores(exp_id: str, target_id: str = 'target', return_full_df=False):
+    path = [f for f in glob(f'{MY_STORAGE_DIR}/attackr_perc_scores/{exp_id}_{target_id}')][0]
 
     try:
-         data = pd.read_csv(path)
+        data = pd.read_csv(path)
 
-         attack_score = list(filter(lambda x: x.startswith('attackr'), data.columns))
+        attack_score = list(filter(lambda x: x.startswith('attackr'), data.columns))
 
-         # Get those columns from the dataframe
-         train_percs = data[attack_score]
-         train_percs = train_percs.apply(lambda x: x / 100)
-
-         return train_percs.sort_index()
+        if return_full_df:
+            return data
+        else:
+            return data[attack_score].sort_index()
     except Exception as e:
-         print(e)
+        print(e)
 
-def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.linspace(0,1,100)):
+def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.logspace(-5, 0, 100)):
 
     try:
         alphas = sorted(alphas)
@@ -201,13 +204,17 @@ def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.linspace(
             path = [f for f in glob(f'{MY_STORAGE_DIR}/attackr_{alpha}_*/{exp_id}_{target_id}')][0]
             data = pd.read_csv(path)
 
-            data['pred'] = data.apply(lambda x: 1 if x[f"attackr_{str(alpha)}_score"] <= x["thresholds"] else 0, axis=1)
-
-            tn, fp, fn, tp = confusion_matrix(data['target_trained_on'].astype(int), data['pred']).ravel()
+            # data['pred'] = data.apply(lambda x: 1 if x[f"attackr_{str(alpha)}_score"] <= x["thresholds"] else 0, axis=1)
+            y_eval = data['target_trained_on'].astype(int)
+            y_pred = data['preds']
+            tn, fp, fn, tp = confusion_matrix(y_eval, y_pred).ravel()
             tpr = tp / (tp + fn)
             fpr = fp / (fp + tn)
             tpr_values.append(tpr)
             fpr_values.append(fpr)
+
+            roc_auc = roc_auc_score(y_eval, y_pred)
+            print(roc_auc)
 
         tpr_values.insert(0, 0)
         fpr_values.insert(0, 0)
@@ -222,6 +229,7 @@ def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.linspace(
                 linewidth=2.0,
                 color='b',
                 label=f'AUC = {auc_value}')
+        plt.xscale('log')
         ax.set_xlabel("FPR")
         ax.set_ylabel("TPR")
         ax.set_ylim([0.0, 1.1])
@@ -229,17 +237,22 @@ def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.linspace(
     except Exception as e:
          print(e)
 
-def get_rmia_scores(exp_id: str, target_id: str = 'target'):
-    path = [f for f in glob(f'{MY_SECONDARY_STORAGE_DIR}/rmia_2.0_scores/{exp_id}_{target_id}')][0]
+def get_rmia_scores(exp_id: str, target_id: str = 'target', return_full_df=False):
+    path = [f for f in glob(f'{MY_STORAGE_DIR}/rmia_2.0_scores/{exp_id}_{target_id}')][0]
 
     try:
-         return pd.read_csv(path)
+        df = pd.read_csv(path)
+        if return_full_df:
+            return df
+        else:
+            attack_score = list(filter(lambda x: 'rmia' in x, df.columns))
+            return df[attack_score].sort_index()
     except Exception as e:
          print(e)
 
 def print_overall_tpr_at_fpr(df: pd.DataFrame, target_col="lira_score"):
     if target_col == "attackr_score":
-        df = df.sort_values(target_col, ascending=True)
+        # df = df.sort_values(target_col, ascending=True)
         df[target_col] =  1-df[target_col]
     fpr, tpr, _thresholds = metrics.roc_curve(df['target_trained_on'], df[target_col], drop_intermediate=False)
     plt.plot(fpr, tpr)
@@ -278,15 +291,4 @@ def create_bins(df: pd.DataFrame, bins: int = 100, bin_separately: bool = True, 
 
 if __name__ == "__main__":
     # main()
-    exp_id = "WRN40_4_CIFAR100"
-    # exp_id = "WRN28_10_CIFAR100"
-    # exp_id =  "WRN28_2_CINIC10"
-    df = get_lira_scores(exp_id)
-    df["rmia_score"] = get_rmia_scores(exp_id)
-    df["attackr_score"] = get_attackr_scores(exp_id)
-    plt.figure()
-    # print_overall_tpr_at_fpr(df, "lira_score")
-    # print_overall_tpr_at_fpr(df, "rmia_score")
-    # print_overall_tpr_at_fpr(df, "attackr_score")
-    # plt.show()
-    plot_attackr_roc(exp_id)
+
