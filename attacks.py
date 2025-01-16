@@ -17,6 +17,8 @@ from torch.utils.data import Subset, DataLoader
 from config import MODEL_DIR, STORAGE_DIR
 from data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
 from models.model import load_model
+from tqdm import tqdm
+
 
 @dataclass
 class AttackConfig:
@@ -319,6 +321,8 @@ class MembershipInferenceAttack:
 
         results.to_csv(fullpath)
 
+        return results
+
 
 class LiRAAttack(MembershipInferenceAttack):
     def run(self):
@@ -340,7 +344,9 @@ class LiRAAttack(MembershipInferenceAttack):
         lira_scores = self._compute_lira_scores(target_confs, stats_df)
 
         # Save results
-        self._save_attack_results(lira_scores, target_indices, 'lira')
+        results = self._save_attack_results(lira_scores, target_indices, 'lira')
+
+        return results
 
     def _compute_lira_scores(self, target_confs: List[float], stats_df: pd.DataFrame) -> List[float]:
         """Compute LiRA scores using statistical analysis."""
@@ -382,7 +388,8 @@ class RMIAAttack(MembershipInferenceAttack):
         rmia_scores = self._compute_rmia_scores(target_confs, target_indices, stats_df, gamma)
 
         # Save results
-        self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}')
+        results = self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}')
+        return results
 
     def _compute_rmia_scores(self, target_confs: List[float], target_indices: List[int],
                              stats_df: pd.DataFrame, gamma: float) -> List[float]:
@@ -395,10 +402,52 @@ class RMIAAttack(MembershipInferenceAttack):
 
         scores = []
 
-        for i, conf in enumerate(target_confs):
+        for i, conf in tqdm(enumerate(target_confs)):
             pr_x = (np.sum(in_conf[i]) + np.sum(out_conf[i])) / (2 * len(out_conf[i]))
             ratio_x = conf / pr_x
             scores.append(sum((ratio_x / r_z) > gamma for r_z in ratio_z))
+
+        return scores
+
+
+def inverse_quantile(data, value):
+    """Inverse of np.quantile with linear interpolation"""
+    data = np.asarray(data)
+    sorted_data = np.sort(data)
+    
+    # Generate uniform quantiles matching numpy's behavior
+    quantiles = np.linspace(0, 1, len(data))
+
+    # Interpolate to find the quantile for the given value
+    return np.interp(value, sorted_data, quantiles)
+
+
+class AttackRRaw(MembershipInferenceAttack):
+    
+    def run(self):
+        """Execute RMIA (Relative Membership Inference Attack)."""
+        # Load target model
+        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
+        self.model.load_state_dict(saves['model_state_dict'])
+        target_indices = saves['trained_on_indices']
+
+        # Get confidences and compute ratios
+        target_confs = self.extractor.get_losses(self.model, self.device, self.attack_loaders[0])
+        stats_df = self._load_intermediate_stats("losses")
+
+        attackr_scores = self._compute_attackr_scores(target_confs, target_indices, stats_df)
+        results = self._save_attack_results(attackr_scores, target_indices, f'attackr')
+
+        return results
+    
+    def _compute_attackr_scores(self, target_confs: List[float], target_indices: List[int],
+                             stats_df: pd.DataFrame) -> List[float]:
+        """Compute RMIA scores using relative likelihood analysis."""
+        scores = []
+        out_conf = [[x[0] for x in dists] for k,dists in stats_df['out_conf'].items()]
+
+        for point_idx, point_loss_dist in enumerate(out_conf):
+            scores.append(inverse_quantile([0] + point_loss_dist + [1000], target_confs[point_idx]))
 
         return scores
 
@@ -417,11 +466,12 @@ class AttackR(MembershipInferenceAttack):
         stats_df = self._load_intermediate_stats("losses")
 
         # Save results
-        for alpha in alphas:
+        for alpha in tqdm(alphas):
             # Compute AttackR scores
             attackr_scores, thresholds, preds = self._compute_attackr_scores(target_confs, target_indices, stats_df, alpha)
             self._save_attack_results(attackr_scores, target_indices, f'attackr_{alpha}', thresholds=thresholds, preds=preds)
 
+        return attackr_scores
 
 
     @staticmethod
