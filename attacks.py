@@ -230,11 +230,11 @@ class MembershipInferenceAttack:
 
     def select_subset_shadow_metrics(self, stats_df):
         if self.config.n_shadows:
-            selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows)
+            selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows, replace=False)
             in_conf =  {key: [stats_df['in_conf'][key][idx] for idx in selected_idx] for key in stats_df['in_conf']}
             out_conf = {key: [stats_df['out_conf'][key][idx] for idx in selected_idx] for key in stats_df['out_conf']}
 
-            in_var, out_var, in_means, out_means = self.compute_metrics(in_conf, out_conf, self.config.n_shadows)
+            in_var, out_var, in_means, out_means = self.compute_metrics(in_conf, out_conf, self.config.n_shadows*2)
         else:
             in_var, out_var, in_means, out_means = stats_df['in_var'], stats_df['out_var'], stats_df['in_means'], stats_df['out_means']
         return in_var, out_var, in_means, out_means
@@ -430,7 +430,7 @@ class RMIAAttack(MembershipInferenceAttack):
         out_conf = [[x[0] for x in dists] for k, dists in stats_df['out_conf'].items()]
 
         if self.config.n_shadows:
-            selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows)
+            selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows, replace=False)
 
             out_conf = [[c[i] for i in selected_idx] for c in out_conf]
             in_conf = [[c[i] for i in selected_idx] for c in in_conf]
@@ -521,7 +521,7 @@ class AttackR(MembershipInferenceAttack):
         out_conf = [[x[0] for x in dists] for k,dists in stats_df['out_conf'].items()]
 
         if self.config.n_shadows:
-            selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows)
+            selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows, replace=False)
             out_conf = [[c[i] for i in selected_idx] for c in out_conf]
 
         """The threshold is the alpha percentile of the point_loss_distribution. Percentile value is already normalised so we good"""
