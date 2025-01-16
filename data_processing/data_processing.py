@@ -30,7 +30,7 @@ def prepare_transform(dataset_name: str, arch: str, augment: bool = False, mirro
     """
     if augment and mirror_all:
         raise ValueError("Both augment and mirror_all are set to True. Only one should be set at a time")
-    
+
     # CIFAR10 Transforms
     if dataset_name == "CIFAR10":
         # Specific transforms for ResNet architectures
