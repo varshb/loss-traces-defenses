@@ -188,7 +188,7 @@ def get_attackr_scores(exp_id: str, target_id: str = 'target', return_full_df=Fa
         if return_full_df:
             return data
         else:
-            return data[attack_score].sort_index()
+            return 1-data[attack_score].sort_index()
     except Exception as e:
         print(e)
 
@@ -291,4 +291,5 @@ def create_bins(df: pd.DataFrame, bins: int = 100, bin_separately: bool = True, 
 
 if __name__ == "__main__":
     # main()
-
+    exp_id = "wrn28-2_CIFAR10"
+    df = get_lira_scores(exp_id)
