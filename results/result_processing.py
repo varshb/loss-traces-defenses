@@ -163,7 +163,6 @@ def _reduction_reduce_by_x(traces: pd.DataFrame) -> pd.Series:
 
 
 def get_trace_reduction(exp_id: str, target_id: str = None, first: int = None, last: int = None, trace_type="losses", reduction="mean"):
-    STORAGE_DIR = "/home/joseph/rds/home/"
     base_name = exp_id + '_' + target_id if target_id else exp_id
     path = os.path.join(STORAGE_DIR, trace_type, base_name + '.pq')
 
