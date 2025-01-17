@@ -163,6 +163,7 @@ def _reduction_reduce_by_x(traces: pd.DataFrame) -> pd.Series:
 
 
 def get_trace_reduction(exp_id: str, target_id: str = None, first: int = None, last: int = None, trace_type="losses", reduction="mean"):
+    STORAGE_DIR = "/home/joseph/rds/home/"
     base_name = exp_id + '_' + target_id if target_id else exp_id
     path = os.path.join(STORAGE_DIR, trace_type, base_name + '.pq')
 
@@ -188,7 +189,7 @@ def get_attackr_scores(exp_id: str, target_id: str = 'target', return_full_df=Fa
         if return_full_df:
             return data
         else:
-            return data[attack_score].sort_index()
+            return 1-data[attack_score].sort_index()
     except Exception as e:
         print(e)
 
@@ -291,4 +292,5 @@ def create_bins(df: pd.DataFrame, bins: int = 100, bin_separately: bool = True, 
 
 if __name__ == "__main__":
     # main()
-
+    exp_id = "wrn28-2_CIFAR10"
+    df = get_lira_scores(exp_id)
