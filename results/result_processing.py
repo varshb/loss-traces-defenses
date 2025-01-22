@@ -5,13 +5,12 @@ from typing import Literal, Optional
 
 import numpy as np
 import pandas as pd
-import torch
 from scipy.stats import stats
 from sklearn import metrics
 from matplotlib import pyplot as plt
 from sklearn.metrics import auc, confusion_matrix, roc_auc_score
 
-from config import MODEL_DIR, STORAGE_DIR, MY_STORAGE_DIR, MY_SECONDARY_STORAGE_DIR
+from config import MODEL_DIR, STORAGE_DIR, MY_STORAGE_DIR
 
 
 def _is_default_index(df: pd.DataFrame) -> bool:
@@ -204,7 +203,6 @@ def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.logspace(
             path = [f for f in glob(f'{MY_STORAGE_DIR}/attackr_{alpha}_*/{exp_id}_{target_id}')][0]
             data = pd.read_csv(path)
 
-            # data['pred'] = data.apply(lambda x: 1 if x[f"attackr_{str(alpha)}_score"] <= x["thresholds"] else 0, axis=1)
             y_eval = data['target_trained_on'].astype(int)
             y_pred = data['preds']
             tn, fp, fn, tp = confusion_matrix(y_eval, y_pred).ravel()
@@ -251,9 +249,6 @@ def get_rmia_scores(exp_id: str, target_id: str = 'target', return_full_df=False
          print(e)
 
 def print_overall_tpr_at_fpr(df: pd.DataFrame, target_col="lira_score"):
-    if target_col == "attackr_score":
-        # df = df.sort_values(target_col, ascending=True)
-        df[target_col] =  1-df[target_col]
     fpr, tpr, _thresholds = metrics.roc_curve(df['target_trained_on'], df[target_col], drop_intermediate=False)
     plt.plot(fpr, tpr)
     plt.xlim(left=0)
@@ -286,10 +281,3 @@ def create_bins(df: pd.DataFrame, bins: int = 100, bin_separately: bool = True, 
         result = pd.qcut(df[binning_col], bins, labels=False)
 
     return result
-
-
-
-if __name__ == "__main__":
-    # main()
-    exp_id = "wrn28-2_CIFAR10"
-    df = get_lira_scores(exp_id)

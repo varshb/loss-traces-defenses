@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import time
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional
@@ -13,11 +14,14 @@ import torch
 from sklearn import metrics
 from torch.nn import Module
 from torch.utils.data import Subset, DataLoader
+from tqdm import tqdm
 
 from config import MODEL_DIR, STORAGE_DIR
 from data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
 from main import set_seed
 from models.model import load_model
+from results.result_processing import get_overall_tpr_at_fpr
+
 
 @dataclass
 class AttackConfig:
@@ -44,8 +48,7 @@ class ModelConfidenceExtractor:
         return self._get_metrics(model, device, loader, metrics=["target_logits"])[3]
     def get_losses(self,  model: Module, device: torch.device, loader: DataLoader):
         return self._get_metrics(model, device, loader, metrics=["losses"])[0]
-    # def get_all_metrics(self, model: Module, device: torch.device, loader: DataLoader):
-    #     return self._get_metrics(model, device, loader, metrics=["losses", "logits", "scaled_logits"])
+
 
     @staticmethod
     def _get_metrics(model: Module, device: torch.device, loader: DataLoader, metrics=["losses", "logits", "scaled_logits"]) -> List[float]:
@@ -214,7 +217,7 @@ class MembershipInferenceAttack:
             f = np.var
 
         # Compute statistics
-        if n_shadows >= 64:
+        if n_shadows >= 64 and not self.config.offline:
             in_var = [f(confs) for confs in sample_in_confs.values()]
             out_var = [f(confs) for confs in sample_out_confs.values()]
         else:
@@ -234,7 +237,11 @@ class MembershipInferenceAttack:
             in_conf =  {key: [stats_df['in_conf'][key][idx] for idx in selected_idx] for key in stats_df['in_conf']}
             out_conf = {key: [stats_df['out_conf'][key][idx] for idx in selected_idx] for key in stats_df['out_conf']}
 
-            in_var, out_var, in_means, out_means = self.compute_metrics(in_conf, out_conf, self.config.n_shadows*2)
+            if self.config.offline:
+                n = self.config.n_shadows
+            else:
+                n = self.config.n_shadows*2
+            in_var, out_var, in_means, out_means = self.compute_metrics(in_conf, out_conf, n)
         else:
             in_var, out_var, in_means, out_means = stats_df['in_var'], stats_df['out_var'], stats_df['in_means'], stats_df['out_means']
         return in_var, out_var, in_means, out_means
@@ -289,8 +296,10 @@ class MembershipInferenceAttack:
 
         stats_path = stats_dir / f'{file_name}.pt'
 
+        # Compute intermediate results if they don't exist
         if not stats_path.exists():
-            raise FileNotFoundError(f"No intermediate results found at {stats_path}")
+            print(f"No intermediate results found at {stats_path}. Computing intermediate results...")
+            self.compute_intermediate_results()
 
         return torch.load(stats_path)
 
@@ -341,8 +350,11 @@ class MembershipInferenceAttack:
         if self.config.n_shadows:
             fullpath = Path(str(fullpath) + f"_{self.config.n_shadows}")
 
-        print("Attack AUC:", metrics.roc_auc_score(bools, scores))
+        print("Attack AUC:", metrics.roc_auc_score(bools, scores), "TPR:", get_overall_tpr_at_fpr(results, 0.001, f'{output_dir.rstrip("s")}_score'))
+
         results.to_csv(fullpath)
+
+        return results
 
 
 class LiRAAttack(MembershipInferenceAttack):
@@ -354,7 +366,6 @@ class LiRAAttack(MembershipInferenceAttack):
         target_indices = saves['trained_on_indices']
 
         # Get target model confidences
-        # target_confs = self.extractor.get_scaled_logits(self.model, self.device, self.attack_loaders)
         target_confs = [self.extractor.get_scaled_logits(self.model, self.device, loader) for loader in self.attack_loaders]
         target_confs = np.array(target_confs).T
 
@@ -365,7 +376,8 @@ class LiRAAttack(MembershipInferenceAttack):
         lira_scores = self._compute_lira_scores(target_confs, stats_df, self.config.offline)
 
         # Save results
-        self._save_attack_results(lira_scores, target_indices, 'lira')
+        results = self._save_attack_results(lira_scores, target_indices, 'lira')
+        return results
 
     def _compute_lira_scores(self, target_confs: List[float], stats_df: pd.DataFrame, offline) -> List[float]:
         """Compute LiRA scores using statistical analysis."""
@@ -401,10 +413,9 @@ class LiRAAttack(MembershipInferenceAttack):
         return scores
 
 
-## TODO: They do a thingy to compute value of gamma with a holdout set. Set to 2 currently since thats what the paper uses
 class RMIAAttack(MembershipInferenceAttack):
     def run(self, gamma: float = 2.0):
-        """Execute RMIA (Relative Membership Inference Attack)."""
+        """Execute RMIA"""
         # Load target model
         saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
         self.model.load_state_dict(saves['model_state_dict'])
@@ -418,8 +429,9 @@ class RMIAAttack(MembershipInferenceAttack):
         rmia_scores = self._compute_rmia_scores(target_confs, target_indices, stats_df, gamma)
 
         # Save results
-        self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}')
-        print("Finished training")
+        results = self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}')
+
+        return results
 
     def _compute_rmia_scores(self, target_confs: List[float], target_indices: List[int],
                              stats_df: pd.DataFrame, gamma: float) -> List[float]:
@@ -439,16 +451,29 @@ class RMIAAttack(MembershipInferenceAttack):
 
         scores = []
 
-        for i, conf in enumerate(target_confs):
+        for i, conf in tqdm(enumerate(target_confs)):
             pr_x = (np.sum(in_conf[i]) + np.sum(out_conf[i])) / (2 * len(out_conf[i]))
             ratio_x = conf / pr_x
             scores.append(sum((ratio_x / r_z) > gamma for r_z in ratio_z))
 
         return scores
 
-## TODO: There are point-calibrated thresholds. So each point has it's own and using roc_auc builtin won't work
-class AttackR(MembershipInferenceAttack):
-    def run(self, alphas=np.logspace(-5, 0, 100)):
+
+def inverse_quantile(data, value):
+    """Inverse of np.quantile with linear interpolation"""
+    data = np.asarray(data)
+    sorted_data = np.sort(data)
+
+    # Generate uniform quantiles matching numpy's behavior
+    quantiles = np.linspace(0, 1, len(data))
+
+    # Interpolate to find the quantile for the given value
+    return np.interp(value, sorted_data, quantiles)
+
+
+class AttackRRaw(MembershipInferenceAttack):
+
+    def run(self):
         """Execute RMIA (Relative Membership Inference Attack)."""
         # Load target model
         saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
@@ -459,23 +484,44 @@ class AttackR(MembershipInferenceAttack):
         target_confs = self.extractor.get_losses(self.model, self.device, self.attack_loaders[0])
         stats_df = self._load_intermediate_stats("losses")
 
+        attackr_scores = self._compute_attackr_scores(target_confs, target_indices, stats_df)
+        results = self._save_attack_results(attackr_scores, target_indices, f'attackr')
+
+        return results
+
+    def _compute_attackr_scores(self, target_confs: List[float], target_indices: List[int],
+                                stats_df: pd.DataFrame) -> List[float]:
+        """Compute RMIA scores using relative likelihood analysis."""
+        scores = []
+        out_conf = [[x[0] for x in dists] for k, dists in stats_df['out_conf'].items()]
+
+        for point_idx, point_loss_dist in enumerate(out_conf):
+            scores.append(inverse_quantile([0] + point_loss_dist + [1000], target_confs[point_idx]))
+
+        return scores
+
+
+class AttackR(MembershipInferenceAttack):
+    def run(self, alphas=np.logspace(-5, 0, 100)):
+        """Execute AttackR"""
+        # Load target model
+        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
+        self.model.load_state_dict(saves['model_state_dict'])
+        target_indices = saves['trained_on_indices']
+
+        # Get confidences and compute ratios
+        target_confs = self.extractor.get_losses(self.model, self.device, self.attack_loaders[0])
+        stats_df = self._load_intermediate_stats("losses")
+
         # Save results
-        attackr_scores, thresholds, preds = self._compute_attackr_scores(target_confs, target_indices, stats_df, 0)
-        self._save_attack_results(attackr_scores, target_indices, f'attackr_perc', thresholds=thresholds, preds=preds)
+        for alpha in tqdm(alphas):
+            # Compute AttackR scores
+            attackr_scores, thresholds, preds = self._compute_attackr_scores(target_confs, target_indices, stats_df,
+                                                                             alpha)
+            self._save_attack_results(attackr_scores, target_indices, f'attackr_perc_{alpha}', thresholds=thresholds,
+                                      preds=preds)
 
-    @staticmethod
-    def inverse_quantile(data, value):
-        """Inverse of np.quantile with linear interpolation"""
-        data = np.asarray(data)
-        data = np.append(data, 0)
-        data = np.append(data, 1000)
-        sorted_data = np.sort(data)
-
-        # Generate uniform quantiles matching numpy's behavior
-        quantiles = np.linspace(0, 1, len(data))
-
-        # Interpolate to find the quantile for the given value
-        return np.interp(value, sorted_data, quantiles)
+        return attackr_scores
 
     @staticmethod
     def calculate_loss_threshold(alpha, distribution):
@@ -510,8 +556,7 @@ class AttackR(MembershipInferenceAttack):
 
     def _compute_attackr_scores(self, target_confs: List[float], target_indices: List[int],
                              stats_df: pd.DataFrame, alpha: List[float]) -> List[float]:
-        """Compute RMIA scores using relative likelihood analysis."""
-        # for alpha in alphas:
+
         train_thresholds = []
         train_percs = []
         preds = []
@@ -524,10 +569,9 @@ class AttackR(MembershipInferenceAttack):
             selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows, replace=False)
             out_conf = [[c[i] for i in selected_idx] for c in out_conf]
 
-        """The threshold is the alpha percentile of the point_loss_distribution. Percentile value is already normalised so we good"""
         for point_idx, point_loss_dist in enumerate(out_conf):
             threshold = threshold_func(alpha=alpha, distribution=point_loss_dist)
-            perc = self.inverse_quantile(point_loss_dist, target_confs[point_idx])
+            perc = inverse_quantile([0] + point_loss_dist + [1000], target_confs[point_idx])
             train_thresholds.append(threshold)
             train_percs.append(perc)
 
@@ -576,7 +620,6 @@ def parse_args() -> AttackConfig:
         attack=args.attack,
         n_shadows=args.n_shadows,
         offline=args.offline,
-        ##TODO: Put back augmentation
         augment=args.augment,
         batchsize=args.batchsize,
         num_workers=args.num_workers,
@@ -594,10 +637,8 @@ def main():
     elif config.attack == "RMIA":
         attack = RMIAAttack(config)
     else:  # RMIA
-        attack = AttackR(config)
+        attack = AttackRRaw(config)
 
-    # Compute intermediate results if they don't exist
-    # attack.compute_intermediate_results()
     attack.run()
 
 
