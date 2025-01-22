@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
@@ -27,8 +28,8 @@ class AttackConfig:
     arch: str
     dataset: str
     attack: str
-    n_shadows: Optional[int]
-    offline: Optional[str]
+    n_shadows: Optional[int] = None
+    offline: Optional[str] = None
     augment: bool =  False
     batchsize: int = 500
     num_workers: int = 8
@@ -320,10 +321,6 @@ class MembershipInferenceAttack:
 
         # Handle file collisions
         fullpath = save_dir / result_name
-        # if fullpath.exists():
-        #     print("RESULTS EXIST BUT NOT OVERWRITING", file=sys.stderr)
-        # while fullpath.exists():
-        #     fullpath = Path(str(fullpath) + "_")
 
         # Save results
         results = pd.DataFrame({
@@ -341,8 +338,15 @@ class MembershipInferenceAttack:
         if self.config.n_shadows:
             fullpath = Path(str(fullpath) + f"_{self.config.n_shadows}")
 
+        if fullpath.exists():
+            print("RESULTS EXIST BUT NOT OVERWRITING", file=sys.stderr)
+        while fullpath.exists():
+            fullpath = Path(str(fullpath) + "_")
+
         print("Attack AUC:", metrics.roc_auc_score(bools, scores))
         results.to_csv(fullpath)
+
+        return results
 
 
 class LiRAAttack(MembershipInferenceAttack):
@@ -350,7 +354,7 @@ class LiRAAttack(MembershipInferenceAttack):
         """Execute LiRA (Likelihood Ratio Attack)."""
         # Load target model
         saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
-        self.model.load_state_dict(saves['model_state_dict'])
+        self.model.load_state_dict(saves['model_state_dict'], strict=False)
         target_indices = saves['trained_on_indices']
 
         # Get target model confidences
@@ -365,7 +369,8 @@ class LiRAAttack(MembershipInferenceAttack):
         lira_scores = self._compute_lira_scores(target_confs, stats_df, self.config.offline)
 
         # Save results
-        self._save_attack_results(lira_scores, target_indices, 'lira')
+        results = self._save_attack_results(lira_scores, target_indices, 'lira')
+        return results
 
     def _compute_lira_scores(self, target_confs: List[float], stats_df: pd.DataFrame, offline) -> List[float]:
         """Compute LiRA scores using statistical analysis."""
@@ -418,8 +423,8 @@ class RMIAAttack(MembershipInferenceAttack):
         rmia_scores = self._compute_rmia_scores(target_confs, target_indices, stats_df, gamma)
 
         # Save results
-        self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}')
-        print("Finished training")
+        results = self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}')
+        return results
 
     def _compute_rmia_scores(self, target_confs: List[float], target_indices: List[int],
                              stats_df: pd.DataFrame, gamma: float) -> List[float]:
@@ -434,6 +439,8 @@ class RMIAAttack(MembershipInferenceAttack):
 
             out_conf = [[c[i] for i in selected_idx] for c in out_conf]
             in_conf = [[c[i] for i in selected_idx] for c in in_conf]
+        
+        print(f"n_shadows={self.config.n_shadows}, in_confs={len(in_conf[0])}, out_confs={len(out_conf[0])}")
 
         ratio_z = [target_confs[z] / np.mean(out_conf[z]) for z in test_indices]
 
@@ -448,7 +455,7 @@ class RMIAAttack(MembershipInferenceAttack):
 
 ## TODO: There are point-calibrated thresholds. So each point has it's own and using roc_auc builtin won't work
 class AttackR(MembershipInferenceAttack):
-    def run(self, alphas=np.logspace(-5, 0, 100)):
+    def run(self):
         """Execute RMIA (Relative Membership Inference Attack)."""
         # Load target model
         saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
@@ -461,7 +468,8 @@ class AttackR(MembershipInferenceAttack):
 
         # Save results
         attackr_scores, thresholds, preds = self._compute_attackr_scores(target_confs, target_indices, stats_df, 0)
-        self._save_attack_results(attackr_scores, target_indices, f'attackr_perc', thresholds=thresholds, preds=preds)
+        results = self._save_attack_results(attackr_scores, target_indices, f'attackr', thresholds=thresholds, preds=preds)
+        return results
 
     @staticmethod
     def inverse_quantile(data, value):

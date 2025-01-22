@@ -6,6 +6,7 @@ from tqdm import tqdm
 import shap
 import numpy as np
 import pandas as pd
+from captum.attr import DeepLiftShap
 
 def _loss(model: nn.Module, data_loader: DataLoader):
     device = next(model.parameters()).device
@@ -71,17 +72,18 @@ def _grads(model: nn.Module, data_loader: DataLoader):
 
     return ret
 
-def _shap(model: nn.Module, data_loader: DataLoader):
 
-    def get_background(loader, exclude_indices, n_samples=100):
-        all_indices = set(range(len(loader.dataset)))
-        exclude_indices = set(exclude_indices)
-        valid_indices = list(all_indices - exclude_indices)
-        
-        selected_indices = np.random.choice(valid_indices, n_samples, replace=False)
-        
-        return torch.stack([loader.dataset[idx][0] for idx in selected_indices])
+def get_background(loader, exclude_indices, n_samples=100):
+    all_indices = set(range(len(loader.dataset)))
+    exclude_indices = set(exclude_indices)
+    valid_indices = list(all_indices - exclude_indices)
     
+    selected_indices = np.random.choice(valid_indices, n_samples, replace=False)
+    
+    return torch.stack([loader.dataset[idx][0] for idx in selected_indices])
+
+
+def _shap(model: nn.Module, data_loader: DataLoader):
     device = next(model.parameters()).device
 
     ret = {
@@ -106,10 +108,35 @@ def _shap(model: nn.Module, data_loader: DataLoader):
     
     return ret
 
+def _shap_captum(model: nn.Module, data_loader: DataLoader):
+    device = next(model.parameters()).device
+
+    ret = {
+        "shap_norm": [],
+        "shap_var": [],
+    }
+
+    for inputs, targets, indices in tqdm(data_loader):
+        inputs, targets = inputs.to(device), targets.to(device)
+        background = get_background(data_loader, indices).to(device)
+
+        deep_lift_shap = DeepLiftShap(model)
+
+        attributions = deep_lift_shap.attribute(
+            inputs,
+            baselines=background,
+            target=targets  # Class index you want to explain
+        )
+
+        ret["shap_var"].extend(torch.var(attributions.view(attributions.shape[0],-1),axis=1).tolist())
+        ret["shap_norm"].extend(torch.norm(attributions.view(attributions.shape[0],-1),dim=1).tolist())
+    
+    return ret
+
 METRICS = {
     "loss": _loss,
     "grads": _grads,
-    "shap": _shap,
+    "shap": _shap_captum,
 }
 
 def get_final_model_metrics(model: nn.Module, data_loader: DataLoader, metrics: list[str] = None):
