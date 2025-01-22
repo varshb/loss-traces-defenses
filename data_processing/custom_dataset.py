@@ -3,6 +3,8 @@ import torchvision
 import os
 from PIL import Image
 
+from config import CINIC_10_PATH
+
 
 class IndexCIFAR10(torchvision.datasets.CIFAR10):
     def __getitem__(self, index):
@@ -52,7 +54,7 @@ class IndexCINIC10(torchvision.datasets.VisionDataset):
 
         super().__init__(root, transforms=None, transform=None, target_transform=None)
         self.transform = transform
-        self.data = torchvision.datasets.ImageFolder(os.path.join('/scratch/joseph/data', 'cinic-10', partition)) # TODO
+        self.data = torchvision.datasets.ImageFolder(os.path.join(CINIC_10_PATH, 'cinic-10', partition))
 
     def __getitem__(self, index):
         img, target = self.data[index]

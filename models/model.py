@@ -9,7 +9,6 @@ from config import MODEL_DIR
 from models.simple_convnet import Net
 
 
-## TODO: Remove irrelevant models + possibly the "part_to_train" convention if we're not using it
 class ModelLoader:
     @classmethod
     def _load_simple_convnet(cls, num_classes: int) -> Net:

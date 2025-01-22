@@ -45,8 +45,7 @@ class ModelConfidenceExtractor:
         return self._get_metrics(model, device, loader, metrics=["target_logits"])[3]
     def get_losses(self,  model: Module, device: torch.device, loader: DataLoader):
         return self._get_metrics(model, device, loader, metrics=["losses"])[0]
-    # def get_all_metrics(self, model: Module, device: torch.device, loader: DataLoader):
-    #     return self._get_metrics(model, device, loader, metrics=["losses", "logits", "scaled_logits"])
+
 
     @staticmethod
     def _get_metrics(model: Module, device: torch.device, loader: DataLoader, metrics=["losses", "logits", "scaled_logits"]) -> List[float]:
@@ -235,7 +234,11 @@ class MembershipInferenceAttack:
             in_conf =  {key: [stats_df['in_conf'][key][idx] for idx in selected_idx] for key in stats_df['in_conf']}
             out_conf = {key: [stats_df['out_conf'][key][idx] for idx in selected_idx] for key in stats_df['out_conf']}
 
-            in_var, out_var, in_means, out_means = self.compute_metrics(in_conf, out_conf, self.config.n_shadows*2)
+            if self.config.offline:
+                n = self.config.n_shadows
+            else:
+                n = self.config.n_shadows*2
+            in_var, out_var, in_means, out_means = self.compute_metrics(in_conf, out_conf, n)
         else:
             in_var, out_var, in_means, out_means = stats_df['in_var'], stats_df['out_var'], stats_df['in_means'], stats_df['out_means']
         return in_var, out_var, in_means, out_means
@@ -290,8 +293,10 @@ class MembershipInferenceAttack:
 
         stats_path = stats_dir / f'{file_name}.pt'
 
+        # Compute intermediate results if they don't exist
         if not stats_path.exists():
-            raise FileNotFoundError(f"No intermediate results found at {stats_path}")
+            print(f"No intermediate results found at {stats_path}. Computing intermediate results...")
+            self.compute_intermediate_results()
 
         return torch.load(stats_path)
 
@@ -358,7 +363,6 @@ class LiRAAttack(MembershipInferenceAttack):
         target_indices = saves['trained_on_indices']
 
         # Get target model confidences
-        # target_confs = self.extractor.get_scaled_logits(self.model, self.device, self.attack_loaders)
         target_confs = [self.extractor.get_scaled_logits(self.model, self.device, loader) for loader in self.attack_loaders]
         target_confs = np.array(target_confs).T
 
@@ -386,7 +390,7 @@ class LiRAAttack(MembershipInferenceAttack):
                 else:
                     r = scipy.stats.multivariate_normal.pdf(conf, mean=out_means[i], cov=out_var[i],
                                                         allow_singular=True) + 1e-64
-                    l = scipy.stats.multivariate_normal.pdf(conf, mean=in_means[i],cov=in_var[i],  allow_singular=True) + 1e-64  # TODO
+                    l = scipy.stats.multivariate_normal.pdf(conf, mean=in_means[i],cov=in_var[i],  allow_singular=True) + 1e-64
                     score = l / r
                 scores.append(score)
         else:
@@ -398,7 +402,7 @@ class LiRAAttack(MembershipInferenceAttack):
                     z_score = (conf - out_means[i]) / out_std[i]
                     score = 1 - stats.norm.cdf(z_score)
                 else:
-                    l = scipy.stats.norm.pdf(conf, loc=in_means[i], scale=in_std[i],  allow_singular=True) + 1e-64  # TODO
+                    l = scipy.stats.norm.pdf(conf, loc=in_means[i], scale=in_std[i],  allow_singular=True) + 1e-64
                     r = scipy.stats.norm.pdf(conf, loc=out_means[i], scale=out_std[i],  allow_singular=True) + 1e-64
                     score = l / r
                 scores.append(score)
@@ -406,10 +410,9 @@ class LiRAAttack(MembershipInferenceAttack):
         return scores
 
 
-## TODO: They do a thingy to compute value of gamma with a holdout set. Set to 2 currently since thats what the paper uses
 class RMIAAttack(MembershipInferenceAttack):
     def run(self, gamma: float = 2.0):
-        """Execute RMIA (Relative Membership Inference Attack)."""
+        """Execute RMIA"""
         # Load target model
         saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
         self.model.load_state_dict(saves['model_state_dict'])
@@ -439,7 +442,7 @@ class RMIAAttack(MembershipInferenceAttack):
 
             out_conf = [[c[i] for i in selected_idx] for c in out_conf]
             in_conf = [[c[i] for i in selected_idx] for c in in_conf]
-        
+
         print(f"n_shadows={self.config.n_shadows}, in_confs={len(in_conf[0])}, out_confs={len(out_conf[0])}")
 
         ratio_z = [target_confs[z] / np.mean(out_conf[z]) for z in test_indices]
@@ -453,7 +456,6 @@ class RMIAAttack(MembershipInferenceAttack):
 
         return scores
 
-## TODO: There are point-calibrated thresholds. So each point has it's own and using roc_auc builtin won't work
 class AttackR(MembershipInferenceAttack):
     def run(self):
         """Execute RMIA (Relative Membership Inference Attack)."""
@@ -518,8 +520,7 @@ class AttackR(MembershipInferenceAttack):
 
     def _compute_attackr_scores(self, target_confs: List[float], target_indices: List[int],
                              stats_df: pd.DataFrame, alpha: List[float]) -> List[float]:
-        """Compute RMIA scores using relative likelihood analysis."""
-        # for alpha in alphas:
+
         train_thresholds = []
         train_percs = []
         preds = []
@@ -532,7 +533,6 @@ class AttackR(MembershipInferenceAttack):
             selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows, replace=False)
             out_conf = [[c[i] for i in selected_idx] for c in out_conf]
 
-        """The threshold is the alpha percentile of the point_loss_distribution. Percentile value is already normalised so we good"""
         for point_idx, point_loss_dist in enumerate(out_conf):
             threshold = threshold_func(alpha=alpha, distribution=point_loss_dist)
             perc = self.inverse_quantile(point_loss_dist, target_confs[point_idx])
@@ -584,7 +584,6 @@ def parse_args() -> AttackConfig:
         attack=args.attack,
         n_shadows=args.n_shadows,
         offline=args.offline,
-        ##TODO: Put back augmentation
         augment=args.augment,
         batchsize=args.batchsize,
         num_workers=args.num_workers,
@@ -604,8 +603,6 @@ def main():
     else:  # RMIA
         attack = AttackR(config)
 
-    # Compute intermediate results if they don't exist
-    # attack.compute_intermediate_results()
     attack.run()
 
 
