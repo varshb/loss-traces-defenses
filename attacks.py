@@ -1,10 +1,10 @@
 import argparse
 import os
-import sys
 import time
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
@@ -14,14 +14,11 @@ import torch
 from sklearn import metrics
 from torch.nn import Module
 from torch.utils.data import Subset, DataLoader
-from tqdm import tqdm
 
 from config import MODEL_DIR, STORAGE_DIR
 from data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
 from main import set_seed
 from models.model import load_model
-from results.result_processing import get_overall_tpr_at_fpr
-
 
 @dataclass
 class AttackConfig:
@@ -31,8 +28,8 @@ class AttackConfig:
     arch: str
     dataset: str
     attack: str
-    n_shadows: Optional[int]
-    offline: Optional[str]
+    n_shadows: Optional[int] = None
+    offline: Optional[str] = None
     augment: bool =  False
     batchsize: int = 500
     num_workers: int = 8
@@ -217,7 +214,7 @@ class MembershipInferenceAttack:
             f = np.var
 
         # Compute statistics
-        if n_shadows >= 64 and not self.config.offline:
+        if n_shadows >= 64:
             in_var = [f(confs) for confs in sample_in_confs.values()]
             out_var = [f(confs) for confs in sample_out_confs.values()]
         else:
@@ -329,10 +326,6 @@ class MembershipInferenceAttack:
 
         # Handle file collisions
         fullpath = save_dir / result_name
-        # if fullpath.exists():
-        #     print("RESULTS EXIST BUT NOT OVERWRITING", file=sys.stderr)
-        # while fullpath.exists():
-        #     fullpath = Path(str(fullpath) + "_")
 
         # Save results
         results = pd.DataFrame({
@@ -350,8 +343,12 @@ class MembershipInferenceAttack:
         if self.config.n_shadows:
             fullpath = Path(str(fullpath) + f"_{self.config.n_shadows}")
 
-        print("Attack AUC:", metrics.roc_auc_score(bools, scores), "TPR:", get_overall_tpr_at_fpr(results, 0.001, f'{output_dir.rstrip("s")}_score'))
+        if fullpath.exists():
+            print("RESULTS EXIST BUT NOT OVERWRITING", file=sys.stderr)
+        while fullpath.exists():
+            fullpath = Path(str(fullpath) + "_")
 
+        print("Attack AUC:", metrics.roc_auc_score(bools, scores))
         results.to_csv(fullpath)
 
         return results
@@ -362,7 +359,7 @@ class LiRAAttack(MembershipInferenceAttack):
         """Execute LiRA (Likelihood Ratio Attack)."""
         # Load target model
         saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
-        self.model.load_state_dict(saves['model_state_dict'])
+        self.model.load_state_dict(saves['model_state_dict'], strict=False)
         target_indices = saves['trained_on_indices']
 
         # Get target model confidences
@@ -393,7 +390,7 @@ class LiRAAttack(MembershipInferenceAttack):
                 else:
                     r = scipy.stats.multivariate_normal.pdf(conf, mean=out_means[i], cov=out_var[i],
                                                         allow_singular=True) + 1e-64
-                    l = scipy.stats.multivariate_normal.pdf(conf, mean=in_means[i],cov=in_var[i],  allow_singular=True) + 1e-64  # TODO
+                    l = scipy.stats.multivariate_normal.pdf(conf, mean=in_means[i],cov=in_var[i],  allow_singular=True) + 1e-64
                     score = l / r
                 scores.append(score)
         else:
@@ -405,7 +402,7 @@ class LiRAAttack(MembershipInferenceAttack):
                     z_score = (conf - out_means[i]) / out_std[i]
                     score = 1 - stats.norm.cdf(z_score)
                 else:
-                    l = scipy.stats.norm.pdf(conf, loc=in_means[i], scale=in_std[i],  allow_singular=True) + 1e-64  # TODO
+                    l = scipy.stats.norm.pdf(conf, loc=in_means[i], scale=in_std[i],  allow_singular=True) + 1e-64
                     r = scipy.stats.norm.pdf(conf, loc=out_means[i], scale=out_std[i],  allow_singular=True) + 1e-64
                     score = l / r
                 scores.append(score)
@@ -430,7 +427,6 @@ class RMIAAttack(MembershipInferenceAttack):
 
         # Save results
         results = self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}')
-
         return results
 
     def _compute_rmia_scores(self, target_confs: List[float], target_indices: List[int],
@@ -447,32 +443,20 @@ class RMIAAttack(MembershipInferenceAttack):
             out_conf = [[c[i] for i in selected_idx] for c in out_conf]
             in_conf = [[c[i] for i in selected_idx] for c in in_conf]
 
+        print(f"n_shadows={self.config.n_shadows}, in_confs={len(in_conf[0])}, out_confs={len(out_conf[0])}")
+
         ratio_z = [target_confs[z] / np.mean(out_conf[z]) for z in test_indices]
 
         scores = []
 
-        for i, conf in tqdm(enumerate(target_confs)):
+        for i, conf in enumerate(target_confs):
             pr_x = (np.sum(in_conf[i]) + np.sum(out_conf[i])) / (2 * len(out_conf[i]))
             ratio_x = conf / pr_x
             scores.append(sum((ratio_x / r_z) > gamma for r_z in ratio_z))
 
         return scores
 
-
-def inverse_quantile(data, value):
-    """Inverse of np.quantile with linear interpolation"""
-    data = np.asarray(data)
-    sorted_data = np.sort(data)
-
-    # Generate uniform quantiles matching numpy's behavior
-    quantiles = np.linspace(0, 1, len(data))
-
-    # Interpolate to find the quantile for the given value
-    return np.interp(value, sorted_data, quantiles)
-
-
-class AttackRRaw(MembershipInferenceAttack):
-
+class AttackR(MembershipInferenceAttack):
     def run(self):
         """Execute RMIA (Relative Membership Inference Attack)."""
         # Load target model
@@ -484,44 +468,24 @@ class AttackRRaw(MembershipInferenceAttack):
         target_confs = self.extractor.get_losses(self.model, self.device, self.attack_loaders[0])
         stats_df = self._load_intermediate_stats("losses")
 
-        attackr_scores = self._compute_attackr_scores(target_confs, target_indices, stats_df)
-        results = self._save_attack_results(attackr_scores, target_indices, f'attackr')
-
+        # Save results
+        attackr_scores, thresholds, preds = self._compute_attackr_scores(target_confs, target_indices, stats_df, 0)
+        results = self._save_attack_results(attackr_scores, target_indices, f'attackr', thresholds=thresholds, preds=preds)
         return results
 
-    def _compute_attackr_scores(self, target_confs: List[float], target_indices: List[int],
-                                stats_df: pd.DataFrame) -> List[float]:
-        """Compute RMIA scores using relative likelihood analysis."""
-        scores = []
-        out_conf = [[x[0] for x in dists] for k, dists in stats_df['out_conf'].items()]
+    @staticmethod
+    def inverse_quantile(data, value):
+        """Inverse of np.quantile with linear interpolation"""
+        data = np.asarray(data)
+        data = np.append(data, 0)
+        data = np.append(data, 1000)
+        sorted_data = np.sort(data)
 
-        for point_idx, point_loss_dist in enumerate(out_conf):
-            scores.append(inverse_quantile([0] + point_loss_dist + [1000], target_confs[point_idx]))
+        # Generate uniform quantiles matching numpy's behavior
+        quantiles = np.linspace(0, 1, len(data))
 
-        return scores
-
-
-class AttackR(MembershipInferenceAttack):
-    def run(self, alphas=np.logspace(-5, 0, 100)):
-        """Execute AttackR"""
-        # Load target model
-        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
-        self.model.load_state_dict(saves['model_state_dict'])
-        target_indices = saves['trained_on_indices']
-
-        # Get confidences and compute ratios
-        target_confs = self.extractor.get_losses(self.model, self.device, self.attack_loaders[0])
-        stats_df = self._load_intermediate_stats("losses")
-
-        # Save results
-        for alpha in tqdm(alphas):
-            # Compute AttackR scores
-            attackr_scores, thresholds, preds = self._compute_attackr_scores(target_confs, target_indices, stats_df,
-                                                                             alpha)
-            self._save_attack_results(attackr_scores, target_indices, f'attackr_perc_{alpha}', thresholds=thresholds,
-                                      preds=preds)
-
-        return attackr_scores
+        # Interpolate to find the quantile for the given value
+        return np.interp(value, sorted_data, quantiles)
 
     @staticmethod
     def calculate_loss_threshold(alpha, distribution):
@@ -571,7 +535,7 @@ class AttackR(MembershipInferenceAttack):
 
         for point_idx, point_loss_dist in enumerate(out_conf):
             threshold = threshold_func(alpha=alpha, distribution=point_loss_dist)
-            perc = inverse_quantile([0] + point_loss_dist + [1000], target_confs[point_idx])
+            perc = self.inverse_quantile(point_loss_dist, target_confs[point_idx])
             train_thresholds.append(threshold)
             train_percs.append(perc)
 
@@ -637,7 +601,7 @@ def main():
     elif config.attack == "RMIA":
         attack = RMIAAttack(config)
     else:  # RMIA
-        attack = AttackRRaw(config)
+        attack = AttackR(config)
 
     attack.run()
 

@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import math
 
 #The ResNet models for CIFAR in https://arxiv.org/abs/1512.03385.
@@ -22,7 +23,7 @@ class BasicBlock(nn.Module):
         self.conv1 = conv3x3(inplanes, planes, stride)
         # self.gn1 = nn.GroupNorm(gn_groups, planes, affine=False)
         self.bn1 = nn.BatchNorm2d(planes, affine=False)
-        self.relu = nn.ReLU(inplace=False)
+        # self.relu = F.relu(inplace=False)
         self.conv2 = conv3x3(planes, planes)
         # self.gn2 = nn.GroupNorm(gn_groups, planes, affine=False)
         self.bn2 = nn.BatchNorm2d(planes, affine=False)
@@ -36,7 +37,7 @@ class BasicBlock(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         # out = self.gn1(out)
-        out = self.relu(out)
+        out = F.relu(out)
 
         out = self.conv2(out)
         # out = self.gn2(out)
@@ -47,7 +48,7 @@ class BasicBlock(nn.Module):
             identity = torch.cat((identity, torch.zeros_like(identity)), 1)
 
         out = out + identity
-        out = self.relu(out)
+        out = F.relu(out)
 
         return out
 
@@ -62,7 +63,7 @@ class ResNet(nn.Module):
         self.conv1 = conv3x3(inchannel, 16 * k)
         self.bn1 = nn.BatchNorm2d(self.inplanes, affine=False)
         # self.gn1 = nn.GroupNorm(gn_groups, 16 * k, affine=False)
-        self.relu = nn.ReLU(inplace=False)
+        # self.relu = F.ReLU(inplace=False)
         self.layer1 = self._make_layer(block, 16 * k, layers[0])
         self.layer2 = self._make_layer(block, 32 * k, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 64 * k, layers[2], stride=2)
@@ -102,7 +103,7 @@ class ResNet(nn.Module):
         x = self.conv1(x)
         # x = self.gn1(x)
         x = self.bn1(x)
-        x = self.relu(x)
+        x = F.relu(x)
 
         x = self.layer1(x)
         x = self.layer2(x)
