@@ -146,7 +146,7 @@ class Trainer:
 
         if args.private:
             privacy_engine = PrivacyEngine()
-            model, optimizer, trainloader = privacy_engine.make_private_with_epsilon(max_grad_norm=10.0, module=model,
+            model, self.optimizer, self.trainloader = privacy_engine.make_private_with_epsilon(max_grad_norm=10.0, module=model,
                                                                                      optimizer=self.optimizer,
                                                                                      data_loader=self.trainloader,
                                                                                      target_epsilon=8.0,
