@@ -36,6 +36,8 @@ def parse_input():
                         help='enable individual loss tracking (computed once per epoch)')
     parser.add_argument('--track_confidences', action='store_true',
                         help='enable individual loss tracking (computed once per epoch)')
+    parser.add_argument('--track_grad_norms', action='store_true',
+                        help='enable individual grad norm tracking (computed once per epoch)')
 
     parser.add_argument('--balanced_sampling', action='store_false',
                         help='force target model to train on *balanced* subset of training data')

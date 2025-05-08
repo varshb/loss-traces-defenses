@@ -44,11 +44,14 @@ class Trainer:
         return training_params
 
     def get_all_losses(self, model, args):
-        model.eval()
+        # model.eval()
 
         all_losses = []
         all_confs = []
+        all_norms = []
         for inputs, targets, _indices in self.plainloader:
+            self.optimizer.zero_grad()
+            model.zero_grad()
             inputs, targets = inputs.to(self.device), targets.to(self.device)
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
@@ -64,12 +67,19 @@ class Trainer:
             m = target_confs - pred_confs
             all_confs.extend(m.tolist())
 
+            losses.mean().backward()
+            batch_grads = [p.grad_sample.view(p.grad_sample.size(0), -1) for p in self.training_params]
+            batch_norms = torch.cat(batch_grads, dim=1).norm(dim=1)
+            all_norms.append(batch_norms)
+
+        all_norms = torch.cat(all_norms, dim=0)
         # all_losses = torch.cat(all_losses, dim=0)
-        model.train()
-        return all_losses, all_confs
+        if args.clip_norm:
+            all_norms = all_norms.clamp(max=args.clip_norm)
+        return all_losses, all_confs, all_norms.tolist()
 
 
-    def train_epoch(self, model, epoch, computed_losses, computed_confidences, args):
+    def train_epoch(self, model, epoch, computed_losses, computed_confidences, grad_norms, args):
         print(f'\n{args.exp_id}-Epoch: %d' % epoch)
         model.train()
         total = 0
@@ -77,12 +87,14 @@ class Trainer:
         t0 = time.time()
 
         # collect init losses
-        if (args.track_computed_loss or args.track_confidences) and epoch == 0:
-            losses, confs = self.get_all_losses(model, args)
+        if (args.track_computed_loss or args.track_confidences or args.track_grad_norms) and epoch == 0:
+            losses, confs, norms = self.get_all_losses(model, args)
             if args.track_computed_loss:
                 computed_losses.append(losses)
             if args.track_confidences:
                 computed_confidences.append(confs)
+            if args.track_grad_norms:
+                grad_norms.append(norms)
 
 
         for batch_idx, (inputs, targets, indices) in enumerate(self.trainloader):
@@ -110,12 +122,14 @@ class Trainer:
             total += targets.size(0)
             correct += minibatch_correct.sum()
 
-        if (args.track_computed_loss or args.track_confidences):
-            losses, confs = self.get_all_losses(model, args)
+        if (args.track_computed_loss or args.track_confidences or args.track_grad_norms):
+            losses, confs, norms = self.get_all_losses(model, args)
             if args.track_computed_loss:
                 computed_losses.append(losses)
             if args.track_confidences:
                 computed_confidences.append(confs)
+            if args.track_grad_norms:
+                grad_norms.append(norms)
 
 
         t1 = time.time()
@@ -128,6 +142,7 @@ class Trainer:
         self.training_params = self.get_training_params(model)
         self.optimizer = self.get_optimizer(self.training_params, args.lr, args.momentum, args.weight_decay)
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, args.epochs)
+
 
         if args.private:
             privacy_engine = PrivacyEngine()
@@ -150,6 +165,8 @@ class Trainer:
         # init loss stores
         computed_losses = []
         computed_confidences = []
+        grad_norms = []
+
         self.free_train_losses = pd.DataFrame(np.full((len(self.trainloader.dataset), args.epochs), np.nan))
         self.free_train_confidences = pd.DataFrame(np.full((len(self.trainloader.dataset), args.epochs), np.nan))
 
@@ -165,7 +182,7 @@ class Trainer:
         print('\n==> Starting training')
 
         for epoch in range(args.epochs):
-            train_acc = self.train_epoch(model, epoch, computed_losses, computed_confidences, args)
+            train_acc = self.train_epoch(model, epoch, computed_losses, computed_confidences, grad_norms, args)
             test_acc = self.test(model, args)
 
             if args.checkpoint and (epoch + 1) % 5 == 0:
@@ -180,6 +197,9 @@ class Trainer:
 
         if args.track_confidences:
             save_tracking_data(computed_confidences, args, save_dir="confidences")
+
+        if args.track_grad_norms:
+            save_tracking_data(grad_norms, args, save_dir="grad_norms")
 
         save_model(model, args, self.trainloader, train_acc, test_acc)
 
