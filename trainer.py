@@ -5,8 +5,10 @@ import warnings
 import numpy as np
 import pandas as pd
 import torch
+from opacus import PrivacyEngine, GradSampleModule
+from opacus.optimizers import DPOptimizer
 
-from config import MODEL_DIR, STORAGE_DIR
+from config import MODEL_DIR, STORAGE_DIR, LOCAL_DIR
 
 
 class Trainer:
@@ -45,6 +47,7 @@ class Trainer:
         model.eval()
 
         all_losses = []
+        all_confs = []
         for inputs, targets, _indices in self.plainloader:
             inputs, targets = inputs.to(self.device), targets.to(self.device)
             with warnings.catch_warnings():
@@ -53,25 +56,40 @@ class Trainer:
 
             losses = self.loss_func_sample(outputs, targets)
             all_losses.extend(losses.tolist())
+
+            pred_confs, _ = torch.max(outputs, dim=1)
+            target_confs = outputs[torch.arange(outputs.shape[0]), targets]
+            outputs[torch.arange(outputs.shape[0]), targets] = float('-inf')
+            pred_confs, _ = torch.max(outputs, dim=1)
+            m = target_confs - pred_confs
+            all_confs.extend(m.tolist())
+
         # all_losses = torch.cat(all_losses, dim=0)
         model.train()
-        return all_losses#.tolist()
+        return all_losses, all_confs
 
 
-    def train_epoch(self, model, epoch, computed_losses, args):
-        print('\nEpoch: %d' % epoch)
+    def train_epoch(self, model, epoch, computed_losses, computed_confidences, args):
+        print(f'\n{args.exp_id}-Epoch: %d' % epoch)
         model.train()
         total = 0
         correct = 0
         t0 = time.time()
 
         # collect init losses
-        if args.track_computed_loss and epoch == 0:
-            computed_losses.append(self.get_all_losses(model, args))
+        if (args.track_computed_loss or args.track_confidences) and epoch == 0:
+            losses, confs = self.get_all_losses(model, args)
+            if args.track_computed_loss:
+                computed_losses.append(losses)
+            if args.track_confidences:
+                computed_confidences.append(confs)
+
 
         for batch_idx, (inputs, targets, indices) in enumerate(self.trainloader):
             model.zero_grad()
             self.optimizer.zero_grad()
+            if isinstance(self.optimizer, DPOptimizer):
+                self.optimizer.expected_batch_size = inputs.shape[0]
 
             inputs, targets = inputs.to(self.device), targets.to(self.device)
 
@@ -92,8 +110,13 @@ class Trainer:
             total += targets.size(0)
             correct += minibatch_correct.sum()
 
-        if args.track_computed_loss:
-            computed_losses.append(self.get_all_losses(model, args))
+        if (args.track_computed_loss or args.track_confidences):
+            losses, confs = self.get_all_losses(model, args)
+            if args.track_computed_loss:
+                computed_losses.append(losses)
+            if args.track_confidences:
+                computed_confidences.append(confs)
+
 
         t1 = time.time()
         self.scheduler.step()
@@ -106,11 +129,29 @@ class Trainer:
         self.optimizer = self.get_optimizer(self.training_params, args.lr, args.momentum, args.weight_decay)
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, args.epochs)
 
+        if args.private:
+            privacy_engine = PrivacyEngine()
+            model, optimizer, trainloader = privacy_engine.make_private_with_epsilon(max_grad_norm=10.0, module=model,
+                                                                                     optimizer=self.optimizer,
+                                                                                     data_loader=self.trainloader,
+                                                                                     target_epsilon=8.0,
+                                                                                     target_delta=1e-5,
+                                                                                     epochs=args.epochs)
+
+        if args.clip_norm:
+            model = GradSampleModule(model)
+            self.optimizer = DPOptimizer(
+                optimizer=self.optimizer,
+                noise_multiplier=0.0,
+                max_grad_norm=args.clip_norm,
+                expected_batch_size=args.batchsize,
+            )
 
         # init loss stores
         computed_losses = []
+        computed_confidences = []
         self.free_train_losses = pd.DataFrame(np.full((len(self.trainloader.dataset), args.epochs), np.nan))
-        self.free_train_losses.index = self.trainloader.dataset.indices
+        self.free_train_confidences = pd.DataFrame(np.full((len(self.trainloader.dataset), args.epochs), np.nan))
 
         num_training = len(self.trainloader.dataset)
         num_test = len(self.testloader.dataset)
@@ -124,18 +165,21 @@ class Trainer:
         print('\n==> Starting training')
 
         for epoch in range(args.epochs):
-            train_acc = self.train_epoch(model, epoch, computed_losses, args)
+            train_acc = self.train_epoch(model, epoch, computed_losses, computed_confidences, args)
             test_acc = self.test(model, args)
 
             if args.checkpoint and (epoch + 1) % 5 == 0:
                 save_model(model, args, self.trainloader, train_acc, test_acc, checkpoint=True, epoch=epoch)
 
-        print('\n==> Finished training')
+        # print('\n==> Finished training')
         if args.track_free_loss:
             save_free_loss(self.free_train_losses, args)
 
         if args.track_computed_loss:
             save_tracking_data(computed_losses, args)
+
+        if args.track_confidences:
+            save_tracking_data(computed_confidences, args, save_dir="confidences")
 
         save_model(model, args, self.trainloader, train_acc, test_acc)
 
@@ -172,8 +216,12 @@ def save_free_loss(train_loss, args):
     train_loss.to_parquet(train_path)
 
 
-def save_tracking_data(computed_losses, args):
-    outdir = os.path.join(STORAGE_DIR, 'losses')
+def save_tracking_data(computed_losses, args, save_dir=None):
+    if not save_dir:
+        outdir = os.path.join(STORAGE_DIR, 'losses')
+    else:
+        outdir = os.path.join(STORAGE_DIR, save_dir)
+
     os.makedirs(outdir, exist_ok=True)
 
     file = args.exp_id

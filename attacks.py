@@ -20,6 +20,8 @@ from data_processing.data_processing import get_no_shuffle_train_loader, get_num
 from main import set_seed
 from models.model import load_model
 
+MODEL_DIR = "/home/euodia/rds/home/old_models"
+
 @dataclass
 class AttackConfig:
     exp_id: str
@@ -153,7 +155,7 @@ class MembershipInferenceAttack:
             if not model_path.is_file():
                 break
 
-            saves = torch.load(model_path, map_location=self.device)
+            saves = torch.load(model_path, map_location=self.device, weights_only=False)
             self.model.load_state_dict(saves['model_state_dict'])
 
             for i, loader in enumerate(self.attack_loaders):
@@ -298,7 +300,7 @@ class MembershipInferenceAttack:
             print(f"No intermediate results found at {stats_path}. Computing intermediate results...")
             self.compute_intermediate_results()
 
-        return torch.load(stats_path)
+        return torch.load(stats_path, weights_only=False)
 
     def _save_attack_results(self, scores: List[float], target_trained_on: List[int], output_dir: str, **kwargs):
         """Save attack results in CSV format with membership indicators."""
@@ -349,7 +351,7 @@ class MembershipInferenceAttack:
             fullpath = Path(str(fullpath) + "_")
 
         print("Attack AUC:", metrics.roc_auc_score(bools, scores))
-        results.to_csv(fullpath)
+        # results.to_csv(fullpath)
 
         return results
 
@@ -358,7 +360,7 @@ class LiRAAttack(MembershipInferenceAttack):
     def run(self):
         """Execute LiRA (Likelihood Ratio Attack)."""
         # Load target model
-        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
+        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device, weights_only=False)
         self.model.load_state_dict(saves['model_state_dict'], strict=False)
         target_indices = saves['trained_on_indices']
 
@@ -402,10 +404,10 @@ class LiRAAttack(MembershipInferenceAttack):
                     z_score = (conf - out_means[i]) / out_std[i]
                     score = 1 - stats.norm.cdf(z_score)
                 else:
-                    l = scipy.stats.norm.pdf(conf, loc=in_means[i], scale=in_std[i],  allow_singular=True) + 1e-64
-                    r = scipy.stats.norm.pdf(conf, loc=out_means[i], scale=out_std[i],  allow_singular=True) + 1e-64
+                    l = scipy.stats.norm.pdf(conf, loc=in_means[i], scale=in_std[i]) + 1e-64
+                    r = scipy.stats.norm.pdf(conf, loc=out_means[i], scale=out_std[i]) + 1e-64
                     score = l / r
-                scores.append(score)
+                scores.append(score[0])
 
         return scores
 
@@ -414,13 +416,13 @@ class RMIAAttack(MembershipInferenceAttack):
     def run(self, gamma: float = 2.0):
         """Execute RMIA"""
         # Load target model
-        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
+        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device, weights_only=False)
         self.model.load_state_dict(saves['model_state_dict'])
         target_indices = saves['trained_on_indices']
 
         # Get confidences and compute ratios
-        target_confs = self.extractor.get_logits(self.model, self.device, self.attack_loaders[0])
-        stats_df = self._load_intermediate_stats("logits")
+        target_confs = self.extractor.get_target_logits(self.model, self.device, self.attack_loaders[0])
+        stats_df = self._load_intermediate_stats("target_logits")
 
         # Compute RMIA scores
         rmia_scores = self._compute_rmia_scores(target_confs, target_indices, stats_df, gamma)
@@ -460,7 +462,7 @@ class AttackR(MembershipInferenceAttack):
     def run(self):
         """Execute RMIA (Relative Membership Inference Attack)."""
         # Load target model
-        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device)
+        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device, weights_only=False)
         self.model.load_state_dict(saves['model_state_dict'])
         target_indices = saves['trained_on_indices']
 
@@ -567,8 +569,9 @@ def parse_args() -> AttackConfig:
     if args.checkpoint:
         model_dir = model_dir / f'checkpoint_before_{args.checkpoint}'
 
+    device = torch.device(f"cuda{args.gpu}" if torch.cuda.is_available() else "cpu")
     try:
-        saves = torch.load(model_dir / 'shadow_0')
+        saves = torch.load(model_dir / 'shadow_0', map_location=device)
         args.arch = args.arch or saves['arch']
         args.dataset = args.dataset or saves['dataset']
         args.augment = saves['hyperparameters']['augment']

@@ -3,6 +3,7 @@ import time
 import random
 import numpy as np
 import torch
+from opacus.validators import ModuleValidator
 
 from data_processing.data_processing import prepare_transform, get_trainset, get_testset, prepare_loaders, \
     get_num_classes
@@ -22,6 +23,9 @@ def parse_input():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--arch', default='simple_convnet', type=str, help='model architecture to use')
     parser.add_argument('--dataset', default='CIFAR10', type=str, help='dataset to be trained on')
+    parser.add_argument('--clip_norm', type=float, default=None,
+                        help='enable per-sample gradient clipping and set clipping norm')
+    parser.add_argument('--private', action='store_true')
     parser.add_argument('--augment', action='store_true', help='train with augmentation if available')
     parser.add_argument('--checkpoint', action='store_true')
 
@@ -29,6 +33,8 @@ def parse_input():
     parser.add_argument('--track_free_loss', action='store_true',
                         help='track individual losses from training')
     parser.add_argument('--track_computed_loss', action='store_true',
+                        help='enable individual loss tracking (computed once per epoch)')
+    parser.add_argument('--track_confidences', action='store_true',
                         help='enable individual loss tracking (computed once per epoch)')
 
     parser.add_argument('--balanced_sampling', action='store_false',
@@ -103,6 +109,9 @@ def main():
         print('\n==> Initialising the model..', args.checkpoint)
 
         model = load_model(args.arch, num_classes).to(device)
+
+        if args.clip_norm or args.private:
+            model = ModuleValidator.fix(model)
 
         trainer = Trainer(args, (trainloader, plainloader, testloader), device)
         trainer.train_test(model, args, model_id)
