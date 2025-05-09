@@ -154,13 +154,14 @@ class Trainer:
                                                                                      epochs=args.epochs)
 
         if args.clip_norm:
-            model = GradSampleModule(model)
-            self.optimizer = DPOptimizer(
-                optimizer=self.optimizer,
-                noise_multiplier=0.0,
-                max_grad_norm=args.clip_norm,
-                expected_batch_size=args.batchsize,
-            )
+            privacy_engine = PrivacyEngine()
+            model, self.optimizer, self.trainloader = privacy_engine.make_private(
+                                                                                max_grad_norm=args.clip_norm,
+                                                                                module=model,
+                                                                                optimizer=self.optimizer,
+                                                                                data_loader=self.trainloader,
+                                                                                noise_multiplier=0.0
+                                                                                )
 
         # init loss stores
         computed_losses = []
