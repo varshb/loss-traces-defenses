@@ -25,7 +25,15 @@ def parse_input():
     parser.add_argument('--dataset', default='CIFAR10', type=str, help='dataset to be trained on')
     parser.add_argument('--clip_norm', type=float, default=None,
                         help='enable per-sample gradient clipping and set clipping norm')
+    parser.add_argument('--noise_multiplier', type=float, default=None,
+                        help='noise multiplier for training with DP')
     parser.add_argument('--private', action='store_true')
+    parser.add_argument('--target_epsilon', type=float, default=None,
+                        help='target epsilon for DP')
+    parser.add_argument('--target_delta', type=float, default=1e-5,
+                        help='target delta for DP')
+
+
     parser.add_argument('--augment', action='store_true', help='train with augmentation if available')
     parser.add_argument('--checkpoint', action='store_true')
 
@@ -69,6 +77,8 @@ def set_seed(seed=0):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
 
 
 
@@ -112,7 +122,7 @@ def main():
 
         model = load_model(args.arch, num_classes).to(device)
 
-        if args.clip_norm or args.private:
+        if args.clip_norm or args.private or args.track_grad_norms:
             model = ModuleValidator.fix(model)
 
         trainer = Trainer(args, (trainloader, plainloader, testloader), device)

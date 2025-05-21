@@ -68,15 +68,18 @@ class Trainer:
             all_confs.extend(m.tolist())
 
             losses.mean().backward()
-            batch_grads = [p.grad_sample.view(p.grad_sample.size(0), -1) for p in self.training_params]
-            batch_norms = torch.cat(batch_grads, dim=1).norm(dim=1)
-            all_norms.append(batch_norms)
+            if args.track_grad_norms or args.clip_norm:
+                batch_grads = [p.grad_sample.view(p.grad_sample.size(0), -1) for p in self.training_params]
+                batch_norms = torch.cat(batch_grads, dim=1).norm(dim=1)
+                all_norms.append(batch_norms)
 
-        all_norms = torch.cat(all_norms, dim=0)
         # all_losses = torch.cat(all_losses, dim=0)
-        if args.clip_norm:
-            all_norms = all_norms.clamp(max=args.clip_norm)
-        return all_losses, all_confs, all_norms.tolist()
+        if args.clip_norm or args.track_grad_norms:
+            all_norms = torch.cat(all_norms, dim=0)
+            if args.clip_norm:
+                all_norms = all_norms.clamp(max=args.clip_norm)
+            all_norms = all_norms.tolist()
+        return all_losses, all_confs, all_norms
 
 
     def train_epoch(self, model, epoch, computed_losses, computed_confidences, grad_norms, args):
@@ -113,7 +116,6 @@ class Trainer:
             if args.track_free_loss:
                 self.free_train_losses.loc[indices.tolist(), epoch] = losses.tolist()
 
-
             losses.mean().backward()
             self.optimizer.step()
 
@@ -146,22 +148,25 @@ class Trainer:
 
         if args.private:
             privacy_engine = PrivacyEngine()
-            model, self.optimizer, self.trainloader = privacy_engine.make_private_with_epsilon(max_grad_norm=10.0, module=model,
+            model, self.optimizer, self.trainloader = privacy_engine.make_private_with_epsilon(max_grad_norm=args.clip_norm, module=model,
                                                                                      optimizer=self.optimizer,
                                                                                      data_loader=self.trainloader,
-                                                                                     target_epsilon=8.0,
-                                                                                     target_delta=1e-5,
+                                                                                     target_epsilon=args.target_epsilon,
+                                                                                     target_delta=args.target_delta,
                                                                                      epochs=args.epochs)
 
-        if args.clip_norm:
+        elif args.clip_norm or args.noise_multiplier:
             privacy_engine = PrivacyEngine()
             model, self.optimizer, self.trainloader = privacy_engine.make_private(
-                                                                                max_grad_norm=args.clip_norm,
+                                                                                max_grad_norm=args.clip_norm if args.clip_norm else 0.0,
                                                                                 module=model,
                                                                                 optimizer=self.optimizer,
                                                                                 data_loader=self.trainloader,
-                                                                                noise_multiplier=0.0
+                                                                                noise_multiplier=args.noise_multiplier if args.noise_multiplier else 0.0
                                                                                 )
+
+        if args.track_grad_norms and not isinstance(model, GradSampleModule):
+            model = GradSampleModule(model)
 
         # init loss stores
         computed_losses = []
@@ -255,6 +260,8 @@ def save_tracking_data(computed_losses, args, save_dir=None):
     fullpath = os.path.join(outdir, file)
     if os.path.exists(fullpath):
         print("'DUPLICATE' LOSS - OVERWRITING PREVIOUS", file=sys.stderr)
+
+    print(fullpath)
     pd.DataFrame(computed_losses).transpose().to_parquet(fullpath)
 
 def save_model(model, args, trainloader, train_acc, test_acc, checkpoint=False, epoch=None):
