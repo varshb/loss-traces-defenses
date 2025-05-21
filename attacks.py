@@ -20,8 +20,6 @@ from data_processing.data_processing import get_no_shuffle_train_loader, get_num
 from main import set_seed
 from models.model import load_model
 
-MODEL_DIR = "/home/euodia/rds/home/old_models"
-
 @dataclass
 class AttackConfig:
     exp_id: str
