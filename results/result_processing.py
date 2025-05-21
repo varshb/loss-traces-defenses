@@ -10,7 +10,7 @@ from sklearn import metrics
 from matplotlib import pyplot as plt
 from sklearn.metrics import auc, confusion_matrix, roc_auc_score
 
-from config import MODEL_DIR, STORAGE_DIR, MY_STORAGE_DIR
+from config import STORAGE_DIR, MY_STORAGE_DIR
 
 
 def _is_default_index(df: pd.DataFrame) -> bool:
