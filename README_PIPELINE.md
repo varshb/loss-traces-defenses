@@ -2,6 +2,26 @@
 
 This repository provides a complete, reproducible pipeline for conducting membership inference attacks using the LiRA (Likelihood Ratio Attack) method. The pipeline trains a target model, multiple shadow models, and then performs the attack.
 
+## Setup
+
+To install dependencies, run:
+```
+
+pip install -r requirements.txt
+
+```
+Next create a config.py file with the following and fill in the relevant paths:
+
+```
+
+LOCAL_DIR = # path to this folder
+# paths to store stuff...
+STORAGE_DIR = 
+MY_STORAGE_DIR = 
+MODEL_DIR = 
+DATA_DIR = 
+
+```
 
 ## Quick Start
 
@@ -45,7 +65,7 @@ python run_attack_pipeline.py \
     --exp_id my_experiment \
     --arch wrn28-2 \
     --dataset CIFAR10 \
-    --n_shadows 64 \
+    --n_shadows 256 \
     --gpu :0 \
     --seed 2546 \
     --full
@@ -63,7 +83,7 @@ python run_attack_pipeline.py \
 
 The pipeline supports the following architectures (via `--arch`):
 
-- `wrn28-2`: WideResNet28-2 (default, recommended)
+- `wrn28-2`: WideResNet28-2 (default)
 - `wrn28-10`: WideResNet28-10
 - `wrn40-4`: WideResNet40-4
 
@@ -97,7 +117,7 @@ The pipeline creates the following directory structure:
 ├── shadow_0                  # Shadow model 0
 ├── shadow_1                  # Shadow model 1
 ├── ...
-└── shadow_63                 # Shadow model 63
+└── shadow_256                 # Shadow model 256
 
 {storage_dir}/lira_scores/
 └── {exp_id}_target          # LiRA attack results (CSV)
@@ -216,23 +236,16 @@ The pipeline generates several types of files:
 3. **Intermediate statistics**: Cached statistics for faster attack reruns
 4. **Logs**: Training progress and attack execution logs
 
-## Contributing
 
-To add support for new architectures or datasets:
 
-1. Add the architecture to `models/model.py`
-2. Add dataset support in `data_processing/`
-3. Update the pipeline script if needed
+## References
 
-## Citation
+[^1]: N. Carlini, S. Chien, M. Nasr, S. Song, A. Terzis, and F. Tramer,
+“Membership inference attacks from first principles,” in 2022 IEEE
+Symposium on Security and Privacy (SP). IEEE, 2022, pp. 1897–
+1914
 
-If you use this pipeline in your research, please cite the corresponding paper:
-
-```bibtex
-@article{your_paper,
-  title={Free Record-Level Privacy Risk Evaluation through Artifact-Based Methods},
-  author={Your Authors},
-  journal={Your Journal},
-  year={2024}
-}
-``` 
+[^2]: J. Ye, A. Maddi, S. K. Murakonda, V. Bindschaedler, and R. Shokri,
+“Enhanced membership inference attacks against machine learning
+models,” in Proceedings of the 2022 ACM SIGSAC Conference on
+Computer and Communications Security, 2022, pp. 3093–3106.

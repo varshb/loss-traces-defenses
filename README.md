@@ -47,45 +47,6 @@ DATA_DIR =
 
 ```
 
-The relevant code blocks written below along with the hyperparamters used in our paper to train target models, shadow models, and to run LiRA are also available in scripts/walkthrough.sh. 
-
-To run training on the target model:
-
-```
-
-python $norm_tracker_path/main.py --track_grad_norms --gpu $gpu --dataset $dataset --seed 34568 --arch $arch --batchsize $bs --lr $lr --epochs $epochs --exp_id $exp_id
-
-```
-
-If averaging over duplicates, run a bash script with the following lines:
-
-```
-
-for ((i=0; i<$dual_count; i++))
-do
-    echo "Training dual model $i"
-    start_time=$(date +%s) #
-    taskset -c $cpus python $norm_tracker_path/main.py --track_grad_norms --gpu $gpu --dataset $dataset --seed 8574${i} --dual track_both_$i --arch $arch --batchsize $bs --lr $lr --epochs $epochs --exp_id $exp_id
-    end_time=$(date +%s)
-    elapsed_time=$((end_time - start_time))
-    echo "Took $elapsed_time seconds"
-done
-
-```
-
-To run attackR [^2], run the script in scripts/attack_r.sh which contains the following:
-
-```
-
-echo "Took $elapsed_time seconds"
-for ((i=0; i<$dual_count; i++))
-do
-    echo "Starting attack-r dual ${i}"
-    taskset -c $cpus python $norm_tracker_path/attacks/attack_r.py --gpu $gpu --exp_id $exp_id --target_id dual_track_both_$i --batchsize $bs
-done
-
-```
-
 ## References
 
 [^1]: N. Carlini, S. Chien, M. Nasr, S. Song, A. Terzis, and F. Tramer,
