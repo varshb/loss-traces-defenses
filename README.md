@@ -1,20 +1,16 @@
 # Code for the paper "Free Record-Level Privacy Risk Evaluation through Artifact-Based Methods"
 ## Abstract
-Membership inference attacks (MIAs) are widely used to em-
-pirically assess privacy risks in machine learning models, both
+Membership inference attacks (MIAs) are widely used to empirically assess privacy risks in machine learning models, both
 providing model-level vulnerability metrics and identifying
-the most vulnerable training samples. State-of-the-art meth-
-ods, however, require training hundreds of shadow models
+the most vulnerable training samples. State-of-the-art methods, however, require training hundreds of shadow models
 with the same architecture as the target model. This makes
 the computational cost of assessing the privacy of models
 prohibitive for many practical applications, particularly when
 used iteratively as part of the model development process and
 for large models. We propose a novel approach for identifying
-the training samples most vulnerable to membership infer-
-ence attacks by analyzing artifacts naturally available during
+the training samples most vulnerable to membership inference attacks by analyzing artifacts naturally available during
 the training process. Our method, Loss Trace Interquartile
-Range (LT-IQR), analyzes per-sample loss trajectories col-
-lected during model training to identify high-risk samples
+Range (LT-IQR), analyzes per-sample loss trajectories collected during model training to identify high-risk samples
 without requiring any additional model training. Through
 experiments on standard benchmarks, we demonstrate that
 LT-IQR achieves 92% precision@k= 1% in identifying the
@@ -23,8 +19,7 @@ holds across datasets and model architectures with LT-IQR
 outperforming both traditional vulnerability metrics, such as
 loss, and lightweight MIAs using few shadow models. We
 also show LT-IQR to accurately identify points vulnerable to
-multiple MIA methods and perform ablation studies. We be-
-lieve LT-IQR enables model developers to identify vulnerable
+multiple MIA methods and perform ablation studies. We believe LT-IQR enables model developers to identify vulnerable
 training samples, for free, as part of the model development
 process. Our results emphasize the potential of artifact-based
 methods to efficiently evaluate privacy risks.
