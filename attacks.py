@@ -32,6 +32,7 @@ class AttackConfig:
     dataset: str
     attack: str
     n_shadows: Optional[int] = None
+    shadow_seed: Optional[int] = None
     offline: Optional[str] = None
     augment: bool =  False
     batchsize: int = 500
@@ -272,6 +273,9 @@ class MembershipInferenceAttack:
 
     def select_subset_shadow_metrics(self, stats_df):
         if self.config.n_shadows:
+            if self.config.shadow_seed:
+                np.random.seed(self.config.shadow_seed)
+
             selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows, replace=False)
             in_conf =  {key: [stats_df['in_conf'][key][idx] for idx in selected_idx] for key in stats_df['in_conf']}
             out_conf = {key: [stats_df['out_conf'][key][idx] for idx in selected_idx] for key in stats_df['out_conf']}
@@ -484,6 +488,8 @@ class RMIAAttack(MembershipInferenceAttack):
         out_conf = [[x[0] for x in dists] for k, dists in stats_df['out_conf'].items()]
 
         if self.config.n_shadows:
+            if self.config.shadow_seed:
+                np.random.seed(self.config.shadow_seed)
             selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows, replace=False)
 
             out_conf = [[c[i] for i in selected_idx] for c in out_conf]
@@ -577,6 +583,8 @@ class AttackR(MembershipInferenceAttack):
         out_conf = [[x[0] for x in dists] for k,dists in stats_df['out_conf'].items()]
 
         if self.config.n_shadows:
+            if self.config.shadow_seed:
+                np.random.seed(self.config.shadow_seed)
             selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows, replace=False)
             out_conf = [[c[i] for i in selected_idx] for c in out_conf]
 
