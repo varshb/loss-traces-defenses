@@ -151,7 +151,7 @@ def get_no_shuffle_train_loader(
         mirror_all: bool = False
         ) -> DataLoader:
     transform = prepare_transform(dataset, arch, mirror_all=mirror_all)
-    # transform = prepare_transform(dataset, arch, mirror_all)
+
     attackset = get_trainset(dataset, transform)
     return DataLoader(attackset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
 

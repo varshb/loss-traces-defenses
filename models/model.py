@@ -37,13 +37,13 @@ class ModelLoader:
         from models.wide_resnet import WideResNet
         model = WideResNet(28, num_classes, 2)
         return model
-    
+
     @classmethod
     def _load_even_wide_resnet_28_10(cls, num_classes: int) -> Module:
         from models.wide_resnet import WideResNet
         model = WideResNet(28, num_classes, 10)
         return model
-        
+
     @classmethod
     def _load_wide_resnet_40_2(cls, num_classes: int) -> Module:
         from models.wide_resnet import WideResNet
@@ -55,7 +55,25 @@ class ModelLoader:
         from models.wide_resnet import WideResNet
         model = WideResNet(40, num_classes, 4)
         return model
-    
+
+    @classmethod
+    def _load_vgg16(cls, num_classes: int) -> Module:
+        from torchvision.models import vgg16
+        model = vgg16(num_classes=num_classes)
+        return model
+
+    @classmethod
+    def _load_densenet121(cls, num_classes: int) -> Module:
+        from torchvision.models import densenet121
+        model = densenet121(num_classes=num_classes)
+        return model
+
+    @classmethod
+    def _load_mobilenet_v2(cls, num_classes: int) -> Module:
+        from torchvision.models import mobilenet_v2
+        model = mobilenet_v2(num_classes=num_classes)
+        return model
+
     # Mapping of architecture names to their corresponding loader methods
     _ARCH_LOADERS = {
         'simple_convnet': _load_simple_convnet,
@@ -65,7 +83,10 @@ class ModelLoader:
         'wrn28-2': _load_wide_resnet,
         'wrn28-10': _load_even_wide_resnet_28_10,
         'wrn40-2': _load_wide_resnet_40_2,
-        'wrn40-4': _load_wide_resnet_40_4
+        'wrn40-4': _load_wide_resnet_40_4,
+        'vgg16': _load_vgg16,
+        'densenet121': _load_densenet121,
+        'mobilenetv2': _load_mobilenet_v2
     }
 
     @classmethod

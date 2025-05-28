@@ -7,8 +7,11 @@ from pathlib import Path
 import sys
 
 import numpy as np
+import opacus
 import pandas as pd
 import scipy
+from opacus import GradSampleModule
+from opacus.validators import ModuleValidator
 from scipy import stats
 import torch
 from sklearn import metrics
@@ -126,7 +129,46 @@ class MembershipInferenceAttack:
             get_num_classes(self.config.dataset)
         ).to(self.device)
 
+
         return model, attack_loaders
+    
+    def _is_dp_model_needed(self, hyperparameters: Dict) -> bool:
+        """Determine if the model needs DP compatibility."""
+        return (hyperparameters["private"] or
+                hyperparameters["clip_norm"] is not None or
+                hyperparameters["noise_multiplier"] is not None)
+    
+    def _convert_to_dp_model(self, model: Module) -> Module:
+        """Convert a model to a DP-compatible model."""
+
+        if not isinstance(model, opacus.GradSampleModule):
+            model = ModuleValidator.fix(model)
+            model = GradSampleModule(model)
+
+        return model
+        
+    def _load_model_with_dp_check(self, model_path, strict=True):
+        """Load a model with DP compatibility check.
+        
+        Args:
+            model_path: Path to the saved model
+            strict: Whether to use strict loading for state_dict
+            
+        Returns:
+            Tuple containing:
+            - Model state after loading
+            - Training indices from the saved model
+        """
+        saves = torch.load(model_path, map_location=self.device, weights_only=False)
+        
+        # Check if DP model is needed
+        if self._is_dp_model_needed(saves['hyperparameters']):
+            self.model = self._convert_to_dp_model(self.model)
+            
+        # Load state dictionary
+        self.model.load_state_dict(saves['model_state_dict'], strict=strict)
+        
+        return self.model, saves['trained_on_indices']
 
     def _collect_shadow_model_data(self, metrics=["losses", "logits", "scaled_logits"]) -> Tuple[
         Dict[str, List[List[float]]], List[List[int]]]:
@@ -153,8 +195,9 @@ class MembershipInferenceAttack:
             if not model_path.is_file():
                 break
 
-            saves = torch.load(model_path, map_location=self.device, weights_only=False)
-            self.model.load_state_dict(saves['model_state_dict'])
+            # Load model with DP check
+            self.model, indices = self._load_model_with_dp_check(model_path)
+            shadow_train_indices.append(indices)
 
             for i, loader in enumerate(self.attack_loaders):
                 res = self.extractor._get_metrics(
@@ -170,7 +213,6 @@ class MembershipInferenceAttack:
                     if value:  # Only store non-empty results
                         shadow_metrics[metric_name][i].append(value)
 
-            shadow_train_indices.append(saves['trained_on_indices'])
             print(f"Computed metrics for shadow {shadow_idx}")
             shadow_idx += 1
 
@@ -246,11 +288,11 @@ class MembershipInferenceAttack:
     def save_intermediate_results(self, stats: Dict, output_dir: str = 'logits_intermediate'):
         """Save intermediate statistical results."""
         save_dir = Path(STORAGE_DIR) / output_dir
+        if self.config.checkpoint:
+            save_dir = save_dir / f'checkpoint_before_{self.config.checkpoint}'
         save_dir.mkdir(parents=True, exist_ok=True)
 
         file_name = self.config.exp_id
-        if self.config.checkpoint:
-            file_name += f'_checkpoint_after_{self.config.checkpoint}'
 
         torch.save(stats, os.path.join(save_dir, f'{file_name}.pt'))
 
@@ -289,7 +331,7 @@ class MembershipInferenceAttack:
 
         file_name = self.config.exp_id
         if self.config.checkpoint:
-            file_name += f'_checkpoint_after_{self.config.checkpoint}'
+            stats_dir = stats_dir / f'checkpoint_before_{self.config.checkpoint}'
 
         stats_path = stats_dir / f'{file_name}.pt'
 
@@ -318,11 +360,13 @@ class MembershipInferenceAttack:
 
         # Create save directory
         save_dir = Path(STORAGE_DIR) / f"{output_dir}_scores"
+
+        if self.config.checkpoint:
+            save_dir = save_dir / f'checkpoint_before_{self.config.checkpoint}'
         save_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate result filename
-        result_name = (f'{self.config.exp_id}_{self.config.target_id}' if self.config.checkpoint is None
-                       else f'{self.config.exp_id}_checkpoint_before_{self.config.checkpoint}_{self.config.target_id}')
+        result_name = f'{self.config.exp_id}_{self.config.target_id}'
 
         # Handle file collisions
         fullpath = save_dir / result_name
@@ -349,7 +393,7 @@ class MembershipInferenceAttack:
             fullpath = Path(str(fullpath) + "_")
 
         print("Attack AUC:", metrics.roc_auc_score(bools, scores))
-        # results.to_csv(fullpath)
+        results.to_csv(fullpath)
 
         return results
 
@@ -357,10 +401,11 @@ class MembershipInferenceAttack:
 class LiRAAttack(MembershipInferenceAttack):
     def run(self):
         """Execute LiRA (Likelihood Ratio Attack)."""
-        # Load target model
-        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device, weights_only=False)
-        self.model.load_state_dict(saves['model_state_dict'], strict=False)
-        target_indices = saves['trained_on_indices']
+        # Load target model with DP check
+        self.model, target_indices = self._load_model_with_dp_check(
+            self.model_dir / self.config.target_id, 
+            strict=False
+        )
 
         # Get target model confidences
         target_confs = [self.extractor.get_scaled_logits(self.model, self.device, loader) for loader in self.attack_loaders]
@@ -413,10 +458,11 @@ class LiRAAttack(MembershipInferenceAttack):
 class RMIAAttack(MembershipInferenceAttack):
     def run(self, gamma: float = 2.0):
         """Execute RMIA"""
-        # Load target model
-        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device, weights_only=False)
-        self.model.load_state_dict(saves['model_state_dict'])
-        target_indices = saves['trained_on_indices']
+        # Load target model with DP check
+        self.model, target_indices = self._load_model_with_dp_check(
+            self.model_dir / self.config.target_id, 
+            strict=False
+        )
 
         # Get confidences and compute ratios
         target_confs = self.extractor.get_target_logits(self.model, self.device, self.attack_loaders[0])
@@ -426,7 +472,7 @@ class RMIAAttack(MembershipInferenceAttack):
         rmia_scores = self._compute_rmia_scores(target_confs, target_indices, stats_df, gamma)
 
         # Save results
-        results = self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}')
+        results = self._save_attack_results(rmia_scores, target_indices, f'rmia_{gamma}_new')
         return results
 
     def _compute_rmia_scores(self, target_confs: List[float], target_indices: List[int],
@@ -459,10 +505,11 @@ class RMIAAttack(MembershipInferenceAttack):
 class AttackR(MembershipInferenceAttack):
     def run(self):
         """Execute RMIA (Relative Membership Inference Attack)."""
-        # Load target model
-        saves = torch.load(self.model_dir / self.config.target_id, map_location=self.device, weights_only=False)
-        self.model.load_state_dict(saves['model_state_dict'])
-        target_indices = saves['trained_on_indices']
+        # Load target model with DP check
+        self.model, target_indices = self._load_model_with_dp_check(
+            self.model_dir / self.config.target_id, 
+            strict=False
+        )
 
         # Get confidences and compute ratios
         target_confs = self.extractor.get_losses(self.model, self.device, self.attack_loaders[0])
@@ -601,7 +648,7 @@ def main():
         attack = LiRAAttack(config)
     elif config.attack == "RMIA":
         attack = RMIAAttack(config)
-    else:  # RMIA
+    else: 
         attack = AttackR(config)
 
     attack.run()
