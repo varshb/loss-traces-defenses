@@ -197,17 +197,6 @@ python run_attack_pipeline.py \
     --force
 ```
 
-## Expected Runtime
-
-Approximate times on a modern GPU:
-
-- **Target model training**: 2-4 hours (200 epochs)
-- **64 Shadow models**: 8-16 hours (training in parallel chunks)
-- **LiRA attack**: 30-60 minutes
-- **Total pipeline**: 10-20 hours
-
-Times scale roughly linearly with the number of shadow models.
-
 ## Results Interpretation
 
 After completion, the attack results are saved as a CSV file containing:
@@ -218,13 +207,6 @@ After completion, the attack results are saved as a CSV file containing:
 
 Higher LiRA scores indicate higher likelihood of membership in the training set.
 
-## Troubleshooting
-
-### Common Issues
-
-1. **CUDA out of memory**: Reduce batch size or use CPU training
-2. **Disk space**: The pipeline requires ~10-50GB depending on model size
-3. **Interrupted training**: Use `--status` to check progress and resume
 
 ### Resume After Interruption
 
