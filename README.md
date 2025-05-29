@@ -144,6 +144,9 @@ The pipeline creates the following directory structure:
 {storage_dir}/lira_scores/
 └── {exp_id}_target          # LiRA attack results (CSV)
 
+{storage_dir}/losses/
+└── {exp_id}_target          # Computed loss traces
+
 {storage_dir}/scaled_logits_intermediate/
 └── {exp_id}.pt              # Intermediate statistics for attack
 ```
