@@ -119,7 +119,7 @@ Currently supported datasets (via `--dataset`):
 
 ## Training Configuration
 
-The pipeline uses optimized hyperparameters for WideResNet28-2 on CIFAR10:
+The pipeline uses these hyperparameters:
 
 - **Batch size**: 256
 - **Learning rate**: 0.1  
@@ -198,6 +198,17 @@ python run_attack_pipeline.py \
     --exp_id my_experiment \
     --full \
     --force
+```
+
+### Example 6: With differential privacy
+
+```bash
+python run_attack_pipeline.py \
+    --exp_id dp_experiment \
+    --private \
+    --target_epsilon 8.0 \
+    --clip_norm 1.0 \
+    --full
 ```
 
 ## Results Interpretation
