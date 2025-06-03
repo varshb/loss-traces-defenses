@@ -180,10 +180,10 @@ class AttackPipelineRunner:
                 count += 1
         return count
 
-    def _check_attack_results_exist(self, attack_type: str) -> bool:
+    def _check_attack_results_exist(self, attack_type: str, n_shadows: int) -> bool:
         """Check if attack results already exist for a specific attack type."""
         results_dir = self.storage_dir / f"{attack_type.lower()}_scores"
-        result_file = results_dir / f"{self.exp_id}_target"
+        result_file = results_dir / f"{self.exp_id}_target_{n_shadows}"
         return result_file.exists()
 
     def train_target_model(self, force_retrain: bool = False) -> bool:
@@ -317,7 +317,9 @@ class AttackPipelineRunner:
         Returns:
             True if successful, False otherwise
         """
-        if not force_rerun and self._check_attack_results_exist(attack_type):
+        n_shadows = self.n_shadows//2 # Number of in/out models to use for attack
+
+        if not force_rerun and self._check_attack_results_exist(attack_type, n_shadows):
             print(f"✅ {attack_type} attack results already exist for {self.exp_id}")
             return True
             
@@ -340,7 +342,7 @@ class AttackPipelineRunner:
             "--dataset", self.dataset,
             "--gpu", self.gpu,
             "--target_id", "target",
-            "--n_shadows", str(self.n_shadows//2)  # Number of in/out models to use for attack
+            "--n_shadows", str(n_shadows)  
         ]
         
         return_code = self._run_command(

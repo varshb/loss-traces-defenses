@@ -18,11 +18,10 @@ from sklearn import metrics
 from torch.nn import Module
 from torch.utils.data import Subset, DataLoader
 
-from config import MODEL_DIR, STORAGE_DIR
-from data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
-from main import set_seed
-from models.model import load_model
-from opacus.validators import ModuleValidator
+from loss_traces.config import MODEL_DIR, STORAGE_DIR
+from loss_traces.data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
+from loss_traces.main import set_seed
+from loss_traces.models.model import load_model
 
 @dataclass
 class AttackConfig:
@@ -136,9 +135,9 @@ class MembershipInferenceAttack:
     
     def _is_dp_model_needed(self, hyperparameters: Dict) -> bool:
         """Determine if the model needs DP compatibility."""
-        return (hyperparameters["private"] or
-                hyperparameters["clip_norm"] is not None or
-                hyperparameters["noise_multiplier"] is not None)
+        return (hyperparameters.get("private") or
+                hyperparameters.get("clip_norm") is not None or
+                hyperparameters.get("noise_multiplier") is not None)
     
     def _convert_to_dp_model(self, model: Module) -> Module:
         """Convert a model to a DP-compatible model."""

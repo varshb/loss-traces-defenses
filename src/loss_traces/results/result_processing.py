@@ -10,7 +10,7 @@ from sklearn import metrics
 from matplotlib import pyplot as plt
 from sklearn.metrics import auc, confusion_matrix, roc_auc_score
 
-from config import STORAGE_DIR, STORAGE_DIR
+from loss_traces.config import STORAGE_DIR
 
 
 def _is_default_index(df: pd.DataFrame) -> bool:
@@ -168,16 +168,16 @@ def get_trace_reduction(exp_id: str, target_id: str = None, first: int = None, l
     return get_reduced_data(path, first, last, reduction=reduction)
 
 
-def get_lira_scores(exp_id: str, target_id: str = 'target', return_full_df=True):
+def get_lira_scores(exp_id: str, target_id: str = 'target', n_shadows=128, return_full_df=True):
 
-    df = pd.read_csv(os.path.join(STORAGE_DIR, 'lira_scores', exp_id + '_' + target_id))
+    df = pd.read_csv(os.path.join(STORAGE_DIR, 'lira_scores', f"{exp_id}_{target_id}_{n_shadows}"))
     if return_full_df:
         return df
     return df['lira_score'].sort_index()
 
 
-def get_attackr_scores(exp_id: str, target_id: str = 'target', return_full_df=False):
-    path = [f for f in glob(f'{STORAGE_DIR}/attackr_perc_scores/{exp_id}_{target_id}')][0]
+def get_attackr_scores(exp_id: str, target_id: str = 'target', n_shadows=128, return_full_df=False):
+    path = [f for f in glob(f'{STORAGE_DIR}/attackr_scores/{exp_id}_{target_id}_{n_shadows}')][0]
 
     try:
         data = pd.read_csv(path)
@@ -235,8 +235,8 @@ def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.logspace(
     except Exception as e:
          print(e)
 
-def get_rmia_scores(exp_id: str, target_id: str = 'target', return_full_df=False):
-    path = [f for f in glob(f'{STORAGE_DIR}/rmia_2.0_scores/{exp_id}_{target_id}')][0]
+def get_rmia_scores(exp_id: str, target_id: str = 'target', n_shadows=128, return_full_df=False):
+    path = [f for f in glob(f'{STORAGE_DIR}/rmia_2.0_new_scores/{exp_id}_{target_id}_{n_shadows}')][0]
 
     try:
         df = pd.read_csv(path)
