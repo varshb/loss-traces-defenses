@@ -13,17 +13,13 @@ The script manages experiment IDs, handles intermediate results, and provides pr
 """
 
 import argparse
-import os
 import sys
 import time
 import subprocess
 from pathlib import Path
 from typing import Optional, List
 
-# Add the current directory to Python path for imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from config import MODEL_DIR, STORAGE_DIR, LOCAL_DIR
+from loss_traces.config import MODEL_DIR, STORAGE_DIR
 
 
 class AttackPipelineRunner:
@@ -205,7 +201,7 @@ class AttackPipelineRunner:
             return True
             
         cmd = [
-            "python3", f"{LOCAL_DIR}/main.py",
+            "python3", "-m", "loss_traces.main",
             "--arch", self.arch,
             "--track_computed_loss",  # Required for attack
             "--gpu", self.gpu,
@@ -263,7 +259,7 @@ class AttackPipelineRunner:
             print(f"Found {existing_count}/{self.n_shadows} existing shadow models")
             
         cmd = [
-            "python3", f"{LOCAL_DIR}/main.py",
+            "python3", "-m", "loss_traces.main",
             "--arch", self.arch,
             "--track_computed_loss",  # Required for attack
             "--gpu", self.gpu,
@@ -337,7 +333,7 @@ class AttackPipelineRunner:
             return False
             
         cmd = [
-            "python3", f"{LOCAL_DIR}/attacks.py",
+            "python3", "-m", "loss_traces.attacks",
             "--exp_id", self.exp_id,
             "--attack", attack_type,
             "--arch", self.arch,

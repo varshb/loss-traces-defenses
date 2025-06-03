@@ -5,10 +5,10 @@ import warnings
 import numpy as np
 import pandas as pd
 import torch
-from opacus import PrivacyEngine
+from opacus import PrivacyEngine, GradSampleModule
 from opacus.optimizers import DPOptimizer
 
-from config import MODEL_DIR, STORAGE_DIR
+from loss_traces.config import MODEL_DIR, STORAGE_DIR
 
 
 class Trainer:

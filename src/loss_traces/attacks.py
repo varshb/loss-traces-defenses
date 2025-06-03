@@ -22,6 +22,7 @@ from config import MODEL_DIR, STORAGE_DIR
 from data_processing.data_processing import get_no_shuffle_train_loader, get_num_classes
 from main import set_seed
 from models.model import load_model
+from opacus.validators import ModuleValidator
 
 @dataclass
 class AttackConfig:
@@ -38,6 +39,7 @@ class AttackConfig:
     batchsize: int = 500
     num_workers: int = 8
     gpu: str = ''
+    is_dp: bool = False
 
 
 class ModelConfidenceExtractor:
@@ -129,7 +131,6 @@ class MembershipInferenceAttack:
             self.config.arch,
             get_num_classes(self.config.dataset)
         ).to(self.device)
-
 
         return model, attack_loaders
     

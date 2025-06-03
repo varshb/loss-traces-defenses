@@ -27,23 +27,32 @@ methods to efficiently evaluate privacy risks.
 ## Setup
 
 To install dependencies, run:
-```
-
+```bash
 pip install -r requirements.txt
-
-```
-Next create a config.py file with the following and fill in the relevant paths:
-
 ```
 
-LOCAL_DIR = # path to this folder
-# paths to store stuff...
-STORAGE_DIR = 
-MY_STORAGE_DIR = 
-MODEL_DIR = 
-DATA_DIR = 
+### Configuration
 
+The project uses a configuration system with sensible defaults. The default configuration is provided in `src/loss_traces/config.py`:
+
+```python
+# Default values in src/loss_traces/config.py
+STORAGE_DIR = "./data"          # For storing trained models and MIA results
+DATA_DIR = "./data/datasets"    # For downloading training datasets
+CINIC_10_PATH = "./cinic10"     # For pre-downloaded CINIC-10 dataset
+MODEL_DIR = os.path.join(STORAGE_DIR, "models")  # Derived from STORAGE_DIR
 ```
+
+To override these defaults for your local setup, create a file `src/loss_traces/config_local.py`:
+
+```python
+# Example src/loss_traces/config_local.py
+STORAGE_DIR = "/path/to/your/storage"
+DATA_DIR = "/path/to/your/datasets"
+CINIC_10_PATH = "/path/to/cinic10"
+```
+
+The configuration system will automatically use your local overrides if the file exists.
 
 ## Quick Start
 

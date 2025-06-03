@@ -10,7 +10,7 @@ from sklearn import metrics
 from matplotlib import pyplot as plt
 from sklearn.metrics import auc, confusion_matrix, roc_auc_score
 
-from config import STORAGE_DIR, MY_STORAGE_DIR
+from config import STORAGE_DIR, STORAGE_DIR
 
 
 def _is_default_index(df: pd.DataFrame) -> bool:
@@ -170,14 +170,14 @@ def get_trace_reduction(exp_id: str, target_id: str = None, first: int = None, l
 
 def get_lira_scores(exp_id: str, target_id: str = 'target', return_full_df=True):
 
-    df = pd.read_csv(os.path.join(MY_STORAGE_DIR, 'lira_scores', exp_id + '_' + target_id))
+    df = pd.read_csv(os.path.join(STORAGE_DIR, 'lira_scores', exp_id + '_' + target_id))
     if return_full_df:
         return df
     return df['lira_score'].sort_index()
 
 
 def get_attackr_scores(exp_id: str, target_id: str = 'target', return_full_df=False):
-    path = [f for f in glob(f'{MY_STORAGE_DIR}/attackr_perc_scores/{exp_id}_{target_id}')][0]
+    path = [f for f in glob(f'{STORAGE_DIR}/attackr_perc_scores/{exp_id}_{target_id}')][0]
 
     try:
         data = pd.read_csv(path)
@@ -200,7 +200,7 @@ def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.logspace(
         fpr_values = []
 
         for alpha in alphas:
-            path = [f for f in glob(f'{MY_STORAGE_DIR}/attackr_{alpha}_*/{exp_id}_{target_id}')][0]
+            path = [f for f in glob(f'{STORAGE_DIR}/attackr_{alpha}_*/{exp_id}_{target_id}')][0]
             data = pd.read_csv(path)
 
             y_eval = data['target_trained_on'].astype(int)
@@ -236,7 +236,7 @@ def plot_attackr_roc(exp_id: str, target_id: str = 'target', alphas=np.logspace(
          print(e)
 
 def get_rmia_scores(exp_id: str, target_id: str = 'target', return_full_df=False):
-    path = [f for f in glob(f'{MY_STORAGE_DIR}/rmia_2.0_scores/{exp_id}_{target_id}')][0]
+    path = [f for f in glob(f'{STORAGE_DIR}/rmia_2.0_scores/{exp_id}_{target_id}')][0]
 
     try:
         df = pd.read_csv(path)

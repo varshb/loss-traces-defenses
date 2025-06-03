@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loss-traces"
+version = "0.1.0"
+description = "Free Record-Level Privacy Risk Evaluation through Artifact-Based Methods"
+readme = "README.md"
+requires-python = ">=3.8"
+
+dependencies = [
+    "captum>=0.7.0",
+    "matplotlib>=3.10.3",
+    "numpy>=2.2.6",
+    "opacus>=1.5.3",
+    "pandas>=2.2.3",
+    "Pillow>=11.2.1",
+    "scikit-learn>=1.6.1",
+    "scipy>=1.15.3",
+    "shap>=0.47.1",
+    "torch>=2.6.0",
+    "torchgeo>=0.6.2",
+    "torchvision>=0.21.0",
+    "tqdm>=4.67.1",
+    "pyarrow>=20.0.0",
+    "fastparquet>=2024.11.0",
+    "jupyter>=1.0.0",
+    "notebook>=7.0.0",
+    "ipykernel>=6.0.0",
+]

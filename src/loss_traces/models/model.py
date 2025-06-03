@@ -5,14 +5,14 @@ import torch
 from torch.nn import Module
 from torchvision.models import resnet18, vgg11
 
-from config import MODEL_DIR
-from models.simple_convnet import Net
+from loss_traces.config import MODEL_DIR
+from loss_traces.models.simple_convnet import Net
 
 
 class ModelLoader:
     @classmethod
     def _load_simple_convnet(cls, num_classes: int) -> Net:
-        from models.simple_convnet import Net
+        from loss_traces.models.simple_convnet import Net
         model = Net()
         return model
 
@@ -28,31 +28,31 @@ class ModelLoader:
 
     @classmethod
     def _load_resnet20(cls, num_classes: int) -> Tuple[Module, Module]:
-        from models.resnet_cifar import resnet20
+        from loss_traces.models.resnet_cifar import resnet20
         model = resnet20(num_classes=num_classes)
         return model
 
     @classmethod
     def _load_wide_resnet(cls, num_classes: int) -> Module:
-        from models.wide_resnet import WideResNet
+        from loss_traces.models.wide_resnet import WideResNet
         model = WideResNet(28, num_classes, 2)
         return model
 
     @classmethod
     def _load_even_wide_resnet_28_10(cls, num_classes: int) -> Module:
-        from models.wide_resnet import WideResNet
+        from loss_traces.models.wide_resnet import WideResNet
         model = WideResNet(28, num_classes, 10)
         return model
 
     @classmethod
     def _load_wide_resnet_40_2(cls, num_classes: int) -> Module:
-        from models.wide_resnet import WideResNet
+        from loss_traces.models.wide_resnet import WideResNet
         model = WideResNet(40, num_classes, 2)
         return model
 
     @classmethod
     def _load_wide_resnet_40_4(cls, num_classes: int) -> Module:
-        from models.wide_resnet import WideResNet
+        from loss_traces.models.wide_resnet import WideResNet
         model = WideResNet(40, num_classes, 4)
         return model
 

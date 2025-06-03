@@ -3,7 +3,7 @@ import torchvision
 import os
 from PIL import Image
 
-from config import CINIC_10_PATH
+from loss_traces.config import CINIC_10_PATH
 
 
 class IndexCIFAR10(torchvision.datasets.CIFAR10):

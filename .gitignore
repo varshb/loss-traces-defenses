@@ -1,4 +1,4 @@
-config.py
+config_local.py
 
 # Python
 __pycache__/
