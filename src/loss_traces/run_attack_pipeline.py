@@ -296,7 +296,7 @@ class AttackPipelineRunner:
             cmd,
             f"Training all {self.n_shadows} shadow models" + 
             (f" with DP (ε={self.target_epsilon})" if self.private else ""),
-            timeout=28800  # 8 hours timeout for all models
+            timeout=None
         )
         
         if return_code == 0:
