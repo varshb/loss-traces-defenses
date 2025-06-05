@@ -2,6 +2,7 @@ config_local.py
 *.csv
 *.pdf
 *.json
+data/
 
 # Python
 __pycache__/
