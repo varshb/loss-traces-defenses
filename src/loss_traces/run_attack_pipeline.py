@@ -402,6 +402,7 @@ class AttackPipelineRunner:
             True if all attacks successful, False otherwise
         """
         success_count = 0
+        attacks = ["LiRA"]  # Default to LiRA only for now
         for attack_type in attacks:
             print(f"\n🎯 Running {attack_type} Attack")
             if self.run_attack(attack_type, force_rerun):
@@ -553,7 +554,7 @@ Examples:
                       help="Model architecture (default: wrn28-2)")
     parser.add_argument("--dataset", type=str, default="CIFAR10",
                       help="Dataset to train on (default: CIFAR10)")
-    parser.add_argument("--n_shadows", type=int, default=256,
+    parser.add_argument("--n_shadows", type=int, default=64,
                       help="Number of shadow models to train (default: 64)")
     parser.add_argument("--gpu", type=str, default="",
                       help="GPU specification (e.g., ':0' or '')")
