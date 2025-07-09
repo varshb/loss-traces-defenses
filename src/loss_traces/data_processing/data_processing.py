@@ -223,14 +223,23 @@ def get_no_shuffle_train_loader(
 
 
 def prepare_loaders(
-    dataset: Dataset, plain_dataset: Dataset, testset: Dataset, num_classes: int, indices: list, args
+    dataset: Dataset, plain_dataset: Dataset, testset: Dataset, num_classes: int, indices: list, non_vulnerable: list, args
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    select_indices = get_train_indices(args, dataset, num_classes)
     if indices is not None:
         print("Using provided indices for training set")
         trainset = Subset(dataset, indices)
-    else:
+    if non_vulnerable is not None:
+        print("Using provided non-vulnerable indices for shadow training")
+        select_indices = get_train_indices(
+            args, dataset, num_classes, subset_indices=non_vulnerable
+        )
         trainset = Subset(dataset, select_indices)
+    else:
+        print("Using default sampling for training set")
+        select_indices = get_train_indices(args, dataset, num_classes)
+
+        trainset = Subset(dataset, select_indices)
+        print("trainset length: ", len(trainset))
 
     workers = 4
 
@@ -258,10 +267,14 @@ def prepare_loaders(
     return trainloader, plainloader, testloader
 
 
-def get_train_indices(args, dataset: Dataset, num_classes: int) -> List[int]:
+def get_train_indices(args, dataset: Dataset, num_classes: int, subset_indices: list = None) -> List[int]:
     ## Some special sampling
     if args.shadow_count is not None:
-        all_indices = [i for i in range(len(dataset))]
+        if subset_indices is not None:
+            all_indices = subset_indices
+            print("length of subset_indices: ", len(all_indices))
+        else:
+            all_indices = [i for i in range(len(dataset))]
 
         select_indices = [[] for _ in range(args.shadow_count)]
         for i in all_indices:

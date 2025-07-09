@@ -3,7 +3,8 @@ config_local.py
 *.pdf
 *.json
 data/
-
+trained_models/
+figures/
 # Python
 __pycache__/
 *.py[cod]

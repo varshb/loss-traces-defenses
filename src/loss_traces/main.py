@@ -172,22 +172,34 @@ def main():
         set_seed(args.seed)
         print("==> Preparing data..")
         num_classes = get_num_classes(args.dataset)
-
         if args.layer > 0:
-            print(f"Removing vulnerable points from layer {args.layer}")
-            print("Len before removing: ", len(train_superset))
-            save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10_l1/layer_{args.layer}_safe.csv"
-            with open(save_path, "r") as f:
-                reader = csv.reader(f)
-                next(reader)  # Skip header
-                safe_indices = [int(row[0]) for row in reader]
-        
+            if args.shadow_count is None: # for target model
+                print(f"Removing vulnerable points from layer {args.layer}")
+                print("Len before removing: ", len(train_superset))
+                save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10/layer_{args.layer-1}_safe.csv"
+                with open(save_path, "r") as f:
+                    reader = csv.reader(f)
+                    next(reader)  # Skip header
+                    safe_indices = [int(row[0]) for row in reader]
+            
+                trainloader, plainloader, testloader = prepare_loaders(
+                    train_superset, plain_train_superset, testset, num_classes, safe_indices, args
+                )
+            else: # for shadow model training
+                print(f"Removing vulnerable points from layer {args.layer} for shadow model {args.shadow_id}")
+                print("Len before removing: ", len(train_superset))
+                save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10/layer_{args.layer-1}_full_safe.csv"
+                with open(save_path, "r") as f:
+                    reader = csv.reader(f)
+                    next(reader)  # Skip header
+                    non_vulnerable = [int(row[0]) for row in reader]
+                trainloader, plainloader, testloader = prepare_loaders(
+                    train_superset, plain_train_superset, testset, num_classes, None, non_vulnerable, args
+                )
+        else:  # first model
+            print("Using full training set - no vulnerable points")
             trainloader, plainloader, testloader = prepare_loaders(
-                train_superset, plain_train_superset, testset, num_classes, safe_indices, args
-            )
-        else:
-            trainloader, plainloader, testloader = prepare_loaders(
-                train_superset, plain_train_superset, testset, num_classes, None, args
+                train_superset, plain_train_superset, testset, num_classes, None, None, args
             )
 
         num_training = len(trainloader.dataset)

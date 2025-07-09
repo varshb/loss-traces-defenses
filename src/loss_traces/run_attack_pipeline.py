@@ -277,7 +277,9 @@ class AttackPipelineRunner:
             "--exp_id", self.exp_id,
             "--shadow_count", str(self.n_shadows),
             "--model_start", "0",
-            "--model_stop", str(self.n_shadows)
+            "--model_stop", str(self.n_shadows),
+            "--layer", str(self.layer),  # Layer index for removed vulnerable points
+
         ]
         
         # Add differential privacy parameters if specified
