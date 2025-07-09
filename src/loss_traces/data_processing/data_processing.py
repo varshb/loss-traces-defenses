@@ -223,10 +223,14 @@ def get_no_shuffle_train_loader(
 
 
 def prepare_loaders(
-    dataset: Dataset, plain_dataset: Dataset, testset: Dataset, num_classes: int, args
+    dataset: Dataset, plain_dataset: Dataset, testset: Dataset, num_classes: int, indices: list, args
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     select_indices = get_train_indices(args, dataset, num_classes)
-    trainset = Subset(dataset, select_indices)
+    if indices is not None:
+        print("Using provided indices for training set")
+        trainset = Subset(dataset, indices)
+    else:
+        trainset = Subset(dataset, select_indices)
 
     workers = 4
 

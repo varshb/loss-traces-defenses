@@ -2,9 +2,11 @@ import argparse
 import time
 import random
 import numpy as np
+import csv
+from loss_traces.config import STORAGE_DIR
 import torch
 from opacus.validators import ModuleValidator
-
+from torch.utils.data import Subset
 from loss_traces.data_processing.data_processing import (
     prepare_transform,
     get_trainset,
@@ -118,6 +120,13 @@ def parse_input():
     parser.add_argument("--model_start", type=int, default=0)
     parser.add_argument("--model_stop", type=int, default=1)
 
+    parser.add_argument(
+        "--layer",
+        type=int,
+        default=0,
+        help="layer index for removed vulnerable points (default: 0)",
+    )
+
     args = parser.parse_args()
 
     if (args.shadow_id is not None and not args.shadow_count) or (
@@ -140,6 +149,7 @@ def set_seed(seed=0):
 
 def main():
     args = parse_input()
+    print("Arguments: ", args)
 
     device = "cuda" + args.gpu if torch.cuda.is_available() else "cpu"
     print("DEVICE: ", device)
@@ -161,11 +171,24 @@ def main():
 
         set_seed(args.seed)
         print("==> Preparing data..")
-
         num_classes = get_num_classes(args.dataset)
-        trainloader, plainloader, testloader = prepare_loaders(
-            train_superset, plain_train_superset, testset, num_classes, args
-        )
+
+        if args.layer > 0:
+            print(f"Removing vulnerable points from layer {args.layer}")
+            print("Len before removing: ", len(train_superset))
+            save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10_l1/layer_{args.layer}_safe.csv"
+            with open(save_path, "r") as f:
+                reader = csv.reader(f)
+                next(reader)  # Skip header
+                safe_indices = [int(row[0]) for row in reader]
+        
+            trainloader, plainloader, testloader = prepare_loaders(
+                train_superset, plain_train_superset, testset, num_classes, safe_indices, args
+            )
+        else:
+            trainloader, plainloader, testloader = prepare_loaders(
+                train_superset, plain_train_superset, testset, num_classes, None, args
+            )
 
         num_training = len(trainloader.dataset)
         num_test = len(testloader.dataset)

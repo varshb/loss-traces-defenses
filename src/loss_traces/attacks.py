@@ -34,7 +34,7 @@ class AttackConfig:
     n_shadows: Optional[int] = None
     shadow_seed: Optional[int] = None
     offline: Optional[str] = None
-    augment: bool =  False
+    augment: bool =  True
     batchsize: int = 500
     num_workers: int = 8
     gpu: str = ''
@@ -432,6 +432,7 @@ class LiRAAttack(MembershipInferenceAttack):
         scores = []
 
         if self.config.augment:
+            print("Using multivariate normal distribution for LiRA scores")
             for i, conf in enumerate(target_confs):
                 if offline:
                     r = scipy.stats.multivariate_normal(mean=out_means[i], cov=out_var[i])
@@ -443,6 +444,7 @@ class LiRAAttack(MembershipInferenceAttack):
                     score = l / r
                 scores.append(score)
         else:
+            print("Using univariate normal distribution for LiRA scores")
             in_std = np.sqrt(in_var)
             out_std = np.sqrt(out_var)
 
@@ -630,6 +632,8 @@ def parse_args() -> AttackConfig:
         args.augment = saves['hyperparameters']['augment']
     except Exception as e:
         print(f"Warning: Could not load all settings: {e}")
+
+    print(f"agument={args.augment}, arch={args.arch}, dataset={args.dataset}")
 
     return AttackConfig(
         exp_id=args.exp_id,

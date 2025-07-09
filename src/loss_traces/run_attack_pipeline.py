@@ -29,7 +29,7 @@ class AttackPipelineRunner:
                  n_shadows: int = 64, epochs: int = 100, gpu: str = "", seed: int = 2546,
                  # Differential Privacy parameters
                  private: bool = False, clip_norm: float = None, noise_multiplier: float = None,
-                 target_epsilon: float = None, target_delta: float = 1e-5):
+                 target_epsilon: float = None, target_delta: float = 1e-5, layer: int = 0):
         """
         Initialize the pipeline runner.
         
@@ -46,6 +46,7 @@ class AttackPipelineRunner:
             noise_multiplier: Noise multiplier for DP training
             target_epsilon: Target epsilon for DP (privacy budget)
             target_delta: Target delta for DP (privacy parameter)
+            layer: Layer index for removed vulnerable points (default: 0)
         """
         self.exp_id = exp_id
         self.arch = arch
@@ -53,6 +54,7 @@ class AttackPipelineRunner:
         self.n_shadows = n_shadows
         self.gpu = gpu
         self.seed = seed
+        self.layer = layer  # Layer index for removed vulnerable points
         
         # Training hyperparameters
         self.batchsize = 256 
@@ -213,7 +215,8 @@ class AttackPipelineRunner:
             "--augment",  # Use data augmentation
             "--weight_decay", str(self.weight_decay),
             "--momentum", str(self.momentum),
-            "--exp_id", self.exp_id
+            "--exp_id", self.exp_id,
+            "--layer", str(self.layer),  # Layer index for removed vulnerable points
         ]
         
         # Add differential privacy parameters if specified
@@ -562,7 +565,8 @@ Examples:
                       help="Random seed for reproducibility (default: 2546)")
     parser.add_argument("--epochs", type=int, default=100,
                       help="Number of epochs to train (default: 100)")                  
-    
+    parser.add_argument("--layer", type=int, default=0,
+                      help="Layer index for removed vulnerable points (default: 0)")
     # Differential Privacy arguments
     parser.add_argument("--private", action="store_true",
                       help="Enable differential privacy training")
@@ -617,7 +621,8 @@ Examples:
         clip_norm=args.clip_norm,
         noise_multiplier=args.noise_multiplier,
         target_epsilon=args.target_epsilon,
-        target_delta=args.target_delta
+        target_delta=args.target_delta,
+        layer=args.layer
     )
     
     # Execute requested operation
