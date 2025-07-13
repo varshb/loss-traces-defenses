@@ -14,6 +14,7 @@ from opacus import GradSampleModule
 from opacus.validators import ModuleValidator
 from scipy import stats
 import torch
+import csv
 from sklearn import metrics
 from torch.nn import Module
 from torch.utils.data import Subset, DataLoader
@@ -39,6 +40,7 @@ class AttackConfig:
     num_workers: int = 8
     gpu: str = ''
     is_dp: bool = False
+    layer: int = 0  # Number of layers to use for the attack, default is 0 (all layers)
 
 
 class ModelConfidenceExtractor:
@@ -99,6 +101,7 @@ class MembershipInferenceAttack:
         self.dataset_size = (len(self.attack_loaders[0].dataset.dataset)
                         if isinstance(self.attack_loaders[0].dataset, Subset)
                         else len(self.attack_loaders[0].dataset))
+        print(f"Dataset size: {self.dataset_size}")
 
     def _get_model_directory(self) -> Path:
         dir_path = Path(MODEL_DIR) / self.config.exp_id
@@ -107,6 +110,13 @@ class MembershipInferenceAttack:
         return dir_path
 
     def _initialize_model_and_data(self) -> Tuple[Module, DataLoader]:
+        if self.config.layer > 0:
+            print(f"Using {self.config.layer} layers for attack")
+            save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10/layer_{self.config.layer}_full_safe.csv"
+            with open(save_path, "r") as f:
+                reader = csv.reader(f)
+                next(reader)  # Skip header
+                self.safe_indices = [int(row[0]) for row in reader]
         attack_loaders = [
             get_no_shuffle_train_loader(
                 self.config.dataset,
@@ -123,7 +133,8 @@ class MembershipInferenceAttack:
                     self.config.arch,
                     self.config.batchsize,
                     self.config.num_workers,
-                    mirror_all=True)
+                    mirror_all=True    
+            )
             )
 
         model = load_model(
@@ -235,9 +246,12 @@ class MembershipInferenceAttack:
         for confs, trained_indices in zip(shadow_confs, map(set, shadow_train_indices)):
             mask = np.isin(all_indices, list(trained_indices))
             for idx, conf, in_trained in zip(all_indices, confs, mask):
-                target_dict = sample_in_confs if in_trained else sample_out_confs
-                target_dict[idx].append(conf)
+                if in_trained:
+                    sample_in_confs[idx].append(conf)
+                elif self.config.layer > 0 and idx in self.safe_indices:
+                    sample_out_confs[idx].append(conf)
 
+        print(sample_out_confs[39])
         in_var, out_var, in_means, out_means = self.compute_metrics(sample_in_confs, sample_out_confs, len(shadow_confs))
 
         return {
@@ -252,23 +266,63 @@ class MembershipInferenceAttack:
     def compute_metrics(self, sample_in_confs, sample_out_confs, n_shadows):
 
         if self.config.augment:
-            f = lambda x: np.cov(x, rowvar=False)
+            f = lambda x: np.cov(x, rowvar=False) if len(x) > 1 else np.array([[0.0]])
         else:
-            f = np.var
+            f = lambda x: np.var(x) if len(x) > 0 else 0.0
+
 
         # Compute statistics
         if n_shadows >= 64:
-            in_var = [f(confs) for confs in sample_in_confs.values()]
-            out_var = [f(confs) for confs in sample_out_confs.values()]
+            in_var = []
+            out_var = []
+            
+            for i in range(self.dataset_size):
+                in_confs = sample_in_confs[i]
+                out_confs = sample_out_confs[i]
+                
+                # Handle empty or insufficient data
+                if len(in_confs) > 0:
+                    in_var.append(f(in_confs))
+                else:
+                    # Use default value for samples not in any shadow model
+                    if self.config.augment:
+                        in_var.append(np.array([[0.0]]))
+                    else:
+                        in_var.append(0.0)
+                    
+                if len(out_confs) > 0:
+                    out_var.append(f(out_confs))
+                else:
+                    # Use default value for samples always in shadow models
+                    if self.config.augment:
+                        out_var.append(np.array([[0.0]]))
+                    else:
+                        out_var.append(0.0)
         else:
             global_in_var = f([c for confs in sample_in_confs.values() for c in confs])
             global_out_var = f([c for confs in sample_out_confs.values() for c in confs])
             in_var = [global_in_var] * self.dataset_size
             out_var = [global_out_var] * self.dataset_size
 
-        in_means = [np.mean(confs, axis=0) for confs in sample_in_confs.values()]
-        out_means = [np.mean(confs, axis=0) for confs in sample_out_confs.values()]
-
+        # Compute means with proper handling
+        in_means = []
+        out_means = []
+        
+        for i in range(self.dataset_size):
+            in_confs = sample_in_confs[i]
+            out_confs = sample_out_confs[i]
+            
+            if len(in_confs) > 0:
+                in_means.append(np.mean(in_confs, axis=0))
+            else:
+                # Use default value (could be zeros or global mean)
+                in_means.append(0.0)
+                
+            if len(out_confs) > 0:
+                out_means.append(np.mean(out_confs, axis=0))
+            else:
+                # Use default value (could be zeros or global mean)
+                out_means.append(0.0)
         return in_var, out_var, in_means, out_means
 
     def select_subset_shadow_metrics(self, stats_df):
@@ -277,9 +331,21 @@ class MembershipInferenceAttack:
                 np.random.seed(self.config.shadow_seed)
 
             selected_idx = np.random.choice(range(len(stats_df['in_conf'][0])), self.config.n_shadows, replace=False)
-            in_conf =  {key: [stats_df['in_conf'][key][idx] for idx in selected_idx] for key in stats_df['in_conf']}
-            out_conf = {key: [stats_df['out_conf'][key][idx] for idx in selected_idx] for key in stats_df['out_conf']}
-
+             # Filter shadow metrics for each sample, maintaining original dataset size
+            in_conf = {}
+            out_conf = {}
+            
+            for key in stats_df['in_conf']:
+                # Only select from available indices, pad with empty if needed
+                in_conf[key] = []
+                out_conf[key] = []
+                
+                for idx in selected_idx:
+                    if idx < len(stats_df['in_conf'][key]):
+                        in_conf[key].append(stats_df['in_conf'][key][idx])
+                    if idx < len(stats_df['out_conf'][key]):
+                        out_conf[key].append(stats_df['out_conf'][key][idx])
+                        
             if self.config.offline:
                 n = self.config.n_shadows
             else:
@@ -382,6 +448,9 @@ class MembershipInferenceAttack:
             'og_idx': all_indices
         }).set_index('og_idx')
 
+        if self.config.layer > 0:
+            results = results[results.index.isin(self.safe_indices)]
+            
         if kwargs:
             extra =  pd.DataFrame(kwargs)
             results = pd.concat([results, extra], axis=1)
@@ -396,7 +465,7 @@ class MembershipInferenceAttack:
         while fullpath.exists():
             fullpath = Path(str(fullpath) + "_")
 
-        print("Attack AUC:", metrics.roc_auc_score(bools, scores))
+        print("Attack AUC:", metrics.roc_auc_score(results['target_trained_on'], results[f'{output_dir.rstrip("s")}_score']))
         results.to_csv(fullpath)
 
         return results
@@ -616,7 +685,8 @@ def parse_args() -> AttackConfig:
     parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--gpu', default='', type=str)
     parser.add_argument('--attack', type=str, required=True, choices=['LiRA', 'RMIA', 'AttackR'])
-
+    parser.add_argument('--layer', type=int, default=0, help='Number of layers to use for the attack, default is 0 (all layers)')
+    
     args = parser.parse_args()
 
     # Load saved configurations if available
@@ -647,7 +717,8 @@ def parse_args() -> AttackConfig:
         augment=args.augment,
         batchsize=args.batchsize,
         num_workers=args.num_workers,
-        gpu=args.gpu
+        gpu=args.gpu,
+        layer=args.layer
     )
 
 

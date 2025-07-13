@@ -228,7 +228,7 @@ def prepare_loaders(
     if indices is not None:
         print("Using provided indices for training set")
         trainset = Subset(dataset, indices)
-    if non_vulnerable is not None:
+    elif non_vulnerable is not None:
         print("Using provided non-vulnerable indices for shadow training")
         select_indices = get_train_indices(
             args, dataset, num_classes, subset_indices=non_vulnerable

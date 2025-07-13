@@ -347,7 +347,8 @@ class AttackPipelineRunner:
             "--dataset", self.dataset,
             "--gpu", self.gpu,
             "--target_id", "target",
-            "--n_shadows", str(n_shadows)  
+            "--n_shadows", str(n_shadows), 
+            "--layer", str(self.layer),  # Layer index for removed vulnerable points 
         ]
         
         return_code = self._run_command(

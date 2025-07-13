@@ -62,6 +62,7 @@ class Trainer:
 
             pred_confs, _ = torch.max(outputs, dim=1)
             target_confs = outputs[torch.arange(outputs.shape[0]), targets]
+            outputs = outputs.clone()
             outputs[torch.arange(outputs.shape[0]), targets] = float('-inf')
             pred_confs, _ = torch.max(outputs, dim=1)
             m = target_confs - pred_confs

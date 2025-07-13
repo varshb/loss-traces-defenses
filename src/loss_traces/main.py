@@ -176,19 +176,21 @@ def main():
             if args.shadow_count is None: # for target model
                 print(f"Removing vulnerable points from layer {args.layer}")
                 print("Len before removing: ", len(train_superset))
-                save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10/layer_{args.layer-1}_safe.csv"
+                save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10_rand/layer_{args.layer-1}_safe.csv"
                 with open(save_path, "r") as f:
                     reader = csv.reader(f)
                     next(reader)  # Skip header
                     safe_indices = [int(row[0]) for row in reader]
-            
+
+
                 trainloader, plainloader, testloader = prepare_loaders(
-                    train_superset, plain_train_superset, testset, num_classes, safe_indices, args
+                    train_superset, plain_train_superset, testset, num_classes, safe_indices, None, args
                 )
+                print("Len after removing: ", len(trainloader.dataset))
             else: # for shadow model training
                 print(f"Removing vulnerable points from layer {args.layer} for shadow model {args.shadow_id}")
                 print("Len before removing: ", len(train_superset))
-                save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10/layer_{args.layer-1}_full_safe.csv"
+                save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10_rand/layer_{args.layer-1}_full_safe.csv"
                 with open(save_path, "r") as f:
                     reader = csv.reader(f)
                     next(reader)  # Skip header
