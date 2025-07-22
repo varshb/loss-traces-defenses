@@ -13,7 +13,9 @@ def _loss(model: nn.Module, data_loader: DataLoader):
 
     ret = {
         "loss": [],
-        "confidence": []
+        "confidence_margin": [],
+        "confidence": [],
+        "confidence_log_odds": []
     }
 
     with torch.no_grad():
@@ -28,7 +30,10 @@ def _loss(model: nn.Module, data_loader: DataLoader):
 
             top2_values, _ = torch.topk(log_odds, k=2, dim=1)
             confs = top2_values[:, 0] - top2_values[:, 1]
-            ret["confidence"].extend(confs.tolist())
+            ret["confidence_margin"].extend(confs.tolist())
+            ret["confidence"].extend(probs.max(dim=1).values.tolist())
+            ret["confidence_log_odds"].extend(log_odds.max(dim=1).values.tolist())
+
 
     return ret
 

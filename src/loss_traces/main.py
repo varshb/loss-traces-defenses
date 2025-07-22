@@ -126,6 +126,12 @@ def parse_input():
         default=0,
         help="layer index for removed vulnerable points (default: 0)",
     )
+    parser.add_argument(
+        "--layer_folder",
+        type=str,
+        default="",
+        help="folder name for storing layer indices (default: empty)",
+    )
 
     args = parser.parse_args()
 
@@ -176,7 +182,9 @@ def main():
             if args.shadow_count is None: # for target model
                 print(f"Removing vulnerable points from layer {args.layer}")
                 print("Len before removing: ", len(train_superset))
-                save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10_rand/layer_{args.layer-1}_safe.csv"
+
+                save_path = f"{STORAGE_DIR}/layer_target_indices/{args.layer_folder}/layer_{args.layer-1}_safe.csv"
+                print(f"Loading safe indices from: {save_path}")
                 with open(save_path, "r") as f:
                     reader = csv.reader(f)
                     next(reader)  # Skip header
@@ -190,7 +198,7 @@ def main():
             else: # for shadow model training
                 print(f"Removing vulnerable points from layer {args.layer} for shadow model {args.shadow_id}")
                 print("Len before removing: ", len(train_superset))
-                save_path = f"{STORAGE_DIR}/layer_target_indices/wrn28-2_CIFAR10_rand/layer_{args.layer-1}_full_safe.csv"
+                save_path = f"{STORAGE_DIR}/layer_target_indices/{args.layer_folder}/layer_{args.layer-1}_full_safe.csv"
                 with open(save_path, "r") as f:
                     reader = csv.reader(f)
                     next(reader)  # Skip header

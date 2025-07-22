@@ -25,11 +25,11 @@ from loss_traces.config import MODEL_DIR, STORAGE_DIR
 class AttackPipelineRunner:
     """Manages the full membership inference attack pipeline."""
     
-    def __init__(self, exp_id: str, arch: str = "wrn28-2", dataset: str = "CIFAR10", 
+    def __init__(self, exp_id: str, target: str = 'target', arch: str = "wrn28-2", dataset: str = "CIFAR10", 
                  n_shadows: int = 64, epochs: int = 100, gpu: str = "", seed: int = 2546,
                  # Differential Privacy parameters
                  private: bool = False, clip_norm: float = None, noise_multiplier: float = None,
-                 target_epsilon: float = None, target_delta: float = 1e-5, layer: int = 0):
+                 target_epsilon: float = None, target_delta: float = 1e-5, layer: int = 0, layer_folder: Optional[str] = None):
         """
         Initialize the pipeline runner.
         
@@ -49,12 +49,14 @@ class AttackPipelineRunner:
             layer: Layer index for removed vulnerable points (default: 0)
         """
         self.exp_id = exp_id
+        self.target = target  # Target model identifier
         self.arch = arch
         self.dataset = dataset
         self.n_shadows = n_shadows
         self.gpu = gpu
         self.seed = seed
         self.layer = layer  # Layer index for removed vulnerable points
+        self.layer_folder = layer_folder
         
         # Training hyperparameters
         self.batchsize = 256 
@@ -170,7 +172,7 @@ class AttackPipelineRunner:
 
     def _check_target_model_exists(self) -> bool:
         """Check if target model already exists."""
-        target_path = self.model_dir / "target"
+        target_path = Path(f"{self.model_dir}/{self.target}")
         return target_path.exists()
 
     def _check_shadow_models_exist(self) -> int:
@@ -217,6 +219,7 @@ class AttackPipelineRunner:
             "--momentum", str(self.momentum),
             "--exp_id", self.exp_id,
             "--layer", str(self.layer),  # Layer index for removed vulnerable points
+            "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",
         ]
         
         # Add differential privacy parameters if specified
@@ -279,7 +282,7 @@ class AttackPipelineRunner:
             "--model_start", "0",
             "--model_stop", str(self.n_shadows),
             "--layer", str(self.layer),  # Layer index for removed vulnerable points
-
+            "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",
         ]
         
         # Add differential privacy parameters if specified
@@ -346,11 +349,11 @@ class AttackPipelineRunner:
             "--arch", self.arch,
             "--dataset", self.dataset,
             "--gpu", self.gpu,
-            "--target_id", "target",
+            "--target_id", self.target,
             "--n_shadows", str(n_shadows), 
-            "--layer", str(self.layer),  # Layer index for removed vulnerable points 
+            "--layer", str(self.layer),  # Layer index for removed vulnerable points
+            "--layer_folder", str(self.layer_folder)
         ]
-        
         return_code = self._run_command(
             cmd,
             f"Running {attack_type} attack on {self.exp_id}",
@@ -554,6 +557,8 @@ Examples:
     # Required arguments
     parser.add_argument("--exp_id", type=str, required=True,
                       help="Experiment identifier for saving models and results")
+    parser.add_argument("--target", type=str, default="target",
+                      help="Target model identifier (default: 'target')")
     
     # Model configuration
     parser.add_argument("--arch", type=str, default="wrn28-2",
@@ -570,6 +575,8 @@ Examples:
                       help="Number of epochs to train (default: 100)")                  
     parser.add_argument("--layer", type=int, default=0,
                       help="Layer index for removed vulnerable points (default: 0)")
+    parser.add_argument("--layer_folder", type=str, default=None,
+                      help="Folder to retrieve layer-indices from, if applicable")
     # Differential Privacy arguments
     parser.add_argument("--private", action="store_true",
                       help="Enable differential privacy training")
@@ -613,6 +620,7 @@ Examples:
     # Create pipeline runner
     runner = AttackPipelineRunner(
         exp_id=args.exp_id,
+        target=args.target,
         arch=args.arch,
         dataset=args.dataset,
         n_shadows=args.n_shadows,
@@ -625,7 +633,8 @@ Examples:
         noise_multiplier=args.noise_multiplier,
         target_epsilon=args.target_epsilon,
         target_delta=args.target_delta,
-        layer=args.layer
+        layer=args.layer,
+        layer_folder=args.layer_folder if args.layer > 0 else None
     )
     
     # Execute requested operation
