@@ -204,7 +204,7 @@ def main():
                 save_path = f"{STORAGE_DIR}/layer_target_indices/{args.layer_folder}/layer_{args.layer-1}_full_safe.pkl"
                 with open(save_path, "rb") as f:
                     non_vulnerable = pickle.load(f)
-                non_vulnerable = list(non_vulnerable)
+                non_vulnerable = list(non_vulnerable['og_idx'])
                 trainloader, plainloader, testloader = prepare_loaders(
                     train_superset, plain_train_superset, testset, num_classes, None, non_vulnerable, args
                 )

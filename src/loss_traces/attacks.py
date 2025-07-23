@@ -115,8 +115,8 @@ class MembershipInferenceAttack:
             save_path = f"{STORAGE_DIR}/layer_target_indices/{self.config.layer_folder}/layer_{self.config.layer - 1}_full_safe.pkl"
             print(f"Loading safe indices from {save_path}")
             with open(save_path, "rb") as f:
-                self.safe_indices = pickle.load(f)
-            self.safe_indices = list(self.safe_indices)
+                safe_indices = pickle.load(f)
+            self.safe_indices = list(safe_indices['og_idx'])
             print(f"Safe indices loaded: {len(self.safe_indices)}")
         attack_loaders = [
             get_no_shuffle_train_loader(
