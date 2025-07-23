@@ -14,7 +14,7 @@ from opacus import GradSampleModule
 from opacus.validators import ModuleValidator
 from scipy import stats
 import torch
-import csv
+import pickle
 from sklearn import metrics
 from torch.nn import Module
 from torch.utils.data import Subset, DataLoader
@@ -112,12 +112,11 @@ class MembershipInferenceAttack:
     def _initialize_model_and_data(self) -> Tuple[Module, DataLoader]:
         if self.config.layer > 0:
             print(f"Using {self.config.layer} layers for attack")
-            save_path = f"{STORAGE_DIR}/layer_target_indices/{self.config.layer_folder}/layer_{self.config.layer - 1}_full_safe.csv"
+            save_path = f"{STORAGE_DIR}/layer_target_indices/{self.config.layer_folder}/layer_{self.config.layer - 1}_full_safe.pkl"
             print(f"Loading safe indices from {save_path}")
-            with open(save_path, "r") as f:
-                reader = csv.reader(f)
-                next(reader)  # Skip header
-                self.safe_indices = [int(row[0]) for row in reader]
+            with open(save_path, "rb") as f:
+                self.safe_indices = pickle.load(f)
+            self.safe_indices = list(self.safe_indices)
             print(f"Safe indices loaded: {len(self.safe_indices)}")
         attack_loaders = [
             get_no_shuffle_train_loader(

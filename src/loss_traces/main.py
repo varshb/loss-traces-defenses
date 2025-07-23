@@ -3,6 +3,7 @@ import time
 import random
 import numpy as np
 import csv
+import pickle
 from loss_traces.config import STORAGE_DIR
 import torch
 from opacus.validators import ModuleValidator
@@ -183,13 +184,15 @@ def main():
                 print(f"Removing vulnerable points from layer {args.layer}")
                 print("Len before removing: ", len(train_superset))
 
-                save_path = f"{STORAGE_DIR}/layer_target_indices/{args.layer_folder}/layer_{args.layer-1}_safe.csv"
+                save_path = (
+                    f"{STORAGE_DIR}/layer_target_indices/"
+                    f"{args.layer_folder}/layer_{args.layer-1}_safe.pkl"
+                )
                 print(f"Loading safe indices from: {save_path}")
-                with open(save_path, "r") as f:
-                    reader = csv.reader(f)
-                    next(reader)  # Skip header
-                    safe_indices = [int(row[0]) for row in reader]
+                with open(save_path, "rb") as f:
+                    safe_indices = pickle.load(f)
 
+                safe_indices = list(safe_indices)
 
                 trainloader, plainloader, testloader = prepare_loaders(
                     train_superset, plain_train_superset, testset, num_classes, safe_indices, None, args
@@ -198,11 +201,10 @@ def main():
             else: # for shadow model training
                 print(f"Removing vulnerable points from layer {args.layer} for shadow model {args.shadow_id}")
                 print("Len before removing: ", len(train_superset))
-                save_path = f"{STORAGE_DIR}/layer_target_indices/{args.layer_folder}/layer_{args.layer-1}_full_safe.csv"
-                with open(save_path, "r") as f:
-                    reader = csv.reader(f)
-                    next(reader)  # Skip header
-                    non_vulnerable = [int(row[0]) for row in reader]
+                save_path = f"{STORAGE_DIR}/layer_target_indices/{args.layer_folder}/layer_{args.layer-1}_full_safe.pkl"
+                with open(save_path, "rb") as f:
+                    non_vulnerable = pickle.load(f)
+                non_vulnerable = list(non_vulnerable)
                 trainloader, plainloader, testloader = prepare_loaders(
                     train_superset, plain_train_superset, testset, num_classes, None, non_vulnerable, args
                 )

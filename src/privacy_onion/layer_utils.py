@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import torch
+import pickle
 import argparse
 
 import seaborn as sns
@@ -42,7 +43,7 @@ def get_lt_iqr(exp_id):
 
 def plot_log_lt_iqr(exp_id, layer, top_k=0.05, save_fig=True):
     plt.style.use("plot_style.mplstyle")
-    os.makedirs(f"{STORAGE_DIR}/figures", exist_ok=True)
+    os.makedirs(f"./figures", exist_ok=True)
 
     df = get_lt_iqr(exp_id)
 
@@ -65,14 +66,14 @@ def plot_log_lt_iqr(exp_id, layer, top_k=0.05, save_fig=True):
     plt.tight_layout()
 
     if save_fig:
-        plt.savefig(f"figures/lt_iqr_histogram_layer_{layer}.png")
+        plt.savefig(f"./figures/lt_iqr_histogram_layer_{layer}.png")
 
     plt.show()
 
 def plot_lt_iqr_no_log(exp_id, layer, top_k=0.05, save_fig=True):
     plt.style.use("plot_style.mplstyle")
 
-    os.makedirs(f"{STORAGE_DIR}/figures", exist_ok=True)
+    os.makedirs(f"./figures", exist_ok=True)
 
     df = get_lt_iqr(exp_id)
 
@@ -95,14 +96,14 @@ def plot_lt_iqr_no_log(exp_id, layer, top_k=0.05, save_fig=True):
     plt.tight_layout()
 
     if save_fig:
-        plt.savefig(f"figures/lt_iqr_histogram_layer_{layer}_no_log.png")
+        plt.savefig(f"./figures/lt_iqr_histogram_layer_{layer}_no_log.png")
 
     plt.show()
 
 
-def plot_kde(exp_ids, top_k=0.05, save_fig=True):
+def plot_kde(exp_ids, top_k=0.05, save_name=None):
     plt.style.use("plot_style.mplstyle")
-    os.makedirs(f"{STORAGE_DIR}/figures", exist_ok=True)
+    os.makedirs(f"./figures", exist_ok=True)
 
     
     num_layers = len(exp_ids)
@@ -133,8 +134,8 @@ def plot_kde(exp_ids, top_k=0.05, save_fig=True):
 
     fig.tight_layout()
 
-    if save_fig:
-        fig.savefig(f"{STORAGE_DIR}/figures/lt_iqr_kde_overlay.png")
+    if save_name:
+        fig.savefig(f"./figures/{save_name}.png")
 
     plt.show()
 
@@ -160,7 +161,7 @@ def plot_kde_lira(exp_ids, save_fig=True):
 
     ax.set_xlabel('LiRA Score')
     ax.set_ylabel('Density')
-    plt.xlim(left=-3, right=3)
+    plt.xlim(left=-5, right=5)
 
     sm = cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])  # Required for older matplotlib versions
@@ -197,22 +198,18 @@ def save_layer_target_indices(exp_id, layer, exp_path, top_k=0.05, random=False)
 
 
     # create safe fulset that is all prev_ safe fulset - vulnerable if layer > 0, if not then len(idx) - vulnerable
-    if layer > 0:
-        prev_safe = pd.read_csv(f"{save_path}/layer_{layer - 1}_full_safe.csv")
-        full_safe = prev_safe[~prev_safe['og_idx'].isin(vulnerable)]
 
+    if layer > 0:
+        prev_safe = pd.read_pickle(f"{save_path}/layer_{layer - 1}_full_safe.pkl")
+        full_safe = prev_safe[~prev_safe['og_idx'].isin(vulnerable)]
     else:
         full_safe = pd.DataFrame({'og_idx': np.arange(len(df))})
         full_safe = full_safe[~full_safe['og_idx'].isin(vulnerable)]
+
+    full_safe.to_pickle(
+        f"{save_path}/layer_{layer}_full_safe.pkl")
     
-    # vulnerable.to_csv(
-    #     f"{save_path}/layer_{layer}_vulnerable.csv",
-    #     index=False)
-    full_safe.to_csv(
-        f"{save_path}/layer_{layer}_full_safe.csv",
-        index=False)
-    
-    safe.to_csv(f"{save_path}/layer_{layer}_safe.csv",index=False)
+    safe.to_pickle(f"{save_path}/layer_{layer}_safe.pkl")
 
 def tpr_at_fpr(exp_id, fpr=0.001):
     df = get_lira_scores(exp_id, n_shadows=32)
@@ -224,6 +221,11 @@ def tpr_at_fpr(exp_id, fpr=0.001):
     fpr_values, tpr_values, thresholds = metrics.roc_curve(labels, scores)
     idx = (np.abs(fpr_values - fpr)).argmin()
     tpr_at_fpr = tpr_values[idx]
+
+    y_pred = scores > thresholds[idx]
+    y_true = labels.astype(bool)
+    true_positives = np.sum((y_pred == 1) & (y_true == 1))
+
     precision = metrics.precision_score(labels, scores > thresholds[idx])
     recall = metrics.recall_score(labels, scores > thresholds[idx])
     auc = metrics.roc_auc_score(labels, scores)
@@ -231,6 +233,7 @@ def tpr_at_fpr(exp_id, fpr=0.001):
     results.append({
         'attack': 'LiRA',
         f'tpr_at_fpr_{fpr}': tpr_at_fpr,
+        'tps': true_positives,
         'auc': auc,
         'precision': precision,
         'recall': recall
@@ -285,6 +288,49 @@ def plot_roc(exp_id, save_path=None):
     if save_path:
         plt.savefig(save_path, bbox_inches='tight', dpi=300)
     plt.show()    
+
+
+def plot_multi_roc(exp_ids_target, ideal_indices, save_path=None):
+    """
+    Plots ROC curves from roc_data (dict of {label: (fpr, tpr)}).
+    Optionally, extra_curves (list of (fpr, tpr)) and extra_labels (list of str)
+    can be provided.
+    """
+    # df = get_lira_scores(exp_id, n_shadows=32)
+    # roc_data = calculate_roc(df, cols=["lira_score"])
+    # plt.figure(figsize=(8, 6))
+    # for label, (fpr, tpr) in roc_data.items():
+    #     if label == "lira_score":
+    #         label = "LiRA"
+    #     plt.plot(fpr, tpr, label=label)
+    plt.figure(figsize=(8, 6))
+    plt.style.use("plot_style.mplstyle")
+    for exp_id, target, label in exp_ids_target:
+        df = get_lira_scores(exp_id, target_id=target, n_shadows=32)
+        if label == 'ideal':
+            df = df.iloc[ideal_indices]
+        roc_data = calculate_roc(df, cols=["lira_score"])
+        for _, (fpr, tpr) in roc_data.items():
+            plt.plot(fpr, tpr, label=f"{label})")
+
+    plt.plot(
+        [0, 1], [0, 1],
+        linestyle='--',
+        color='gray',
+        label='Random Guessing'
+    )
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.legend()
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.ylim(bottom=0.001)
+    plt.xlim(left=0.001)
+    plt.grid(True)
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight', dpi=300)
+    plt.show()    
+
 
 
 if __name__ == "__main__":

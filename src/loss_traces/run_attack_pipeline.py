@@ -241,7 +241,7 @@ class AttackPipelineRunner:
             cmd, 
             f"Training target model ({self.arch} on {self.dataset})" + 
             (f" with DP (ε={self.target_epsilon})" if self.private else ""),
-            timeout=7200  # 2 hours timeout
+            timeout=25200  # 2 hours timeout
         )
         
         return return_code == 0
