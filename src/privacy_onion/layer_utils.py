@@ -104,7 +104,6 @@ def plot_lt_iqr_no_log(exp_id, layer, top_k=0.05, save_fig=True):
 def plot_kde(exp_ids, top_k=0.05, save_name=None):
     plt.style.use("plot_style.mplstyle")
     os.makedirs(f"./figures", exist_ok=True)
-
     
     num_layers = len(exp_ids)
     cmap = cm.get_cmap("viridis")
@@ -139,8 +138,52 @@ def plot_kde(exp_ids, top_k=0.05, save_name=None):
 
     plt.show()
 
+def plot_kde_custom(exp_ids, top_k=0.05, labels=None, label_name="Layer", save_name=None):
+    plt.style.use("plot_style.mplstyle")
+    os.makedirs(f"./figures", exist_ok=True)
 
-def plot_kde_lira(exp_ids, save_fig=True):
+    if labels is not None:
+        # Use the range of labels for color normalization
+        vmin = min(labels)
+        vmax = max(labels)
+        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        num_layers = len(labels)
+    else:
+        num_layers = len(exp_ids)
+        norm = mcolors.Normalize(vmin=0, vmax=num_layers - 1)
+
+    cmap = cm.get_cmap("viridis")
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for i, exp_id in enumerate(exp_ids):
+        df = get_lt_iqr(exp_id)
+        members = df[df['target_trained_on'] == True]
+        top_score = members.sort_values(by='lt_iqr', ascending=False)
+        idx = int(len(top_score) * top_k)
+        lt_iqr = top_score["lt_iqr"].values[:idx]
+
+        if labels is not None:
+            color = cmap(norm(labels[i]))
+        else:
+            color = cmap(norm(i))
+        sns.kdeplot(lt_iqr, ax=ax, color=color, fill=False, linewidth=2)
+
+    ax.set_xlabel('LT-IQR Score')
+    ax.set_ylabel('Density')
+
+    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax)
+    cbar.set_label(label_name)
+
+    fig.tight_layout()
+
+    if save_name:
+        fig.savefig(f"./figures/{save_name}.png")
+
+    plt.show()
+
+def plot_kde_lira(exp_ids, save_name=None):
     plt.style.use("plot_style.mplstyle")
     os.makedirs(f"{STORAGE_DIR}/figures", exist_ok=True)
 
@@ -170,10 +213,11 @@ def plot_kde_lira(exp_ids, save_fig=True):
 
     fig.tight_layout()
 
-    if save_fig:
-        fig.savefig(f"{STORAGE_DIR}/figures/lira_kde_overlay.png")
+    if save_name:
+        fig.savefig(f"./figures/{save_name}.png")
 
     plt.show()
+
 
 def save_layer_target_indices(exp_id, layer, exp_path, top_k=0.05, random=False):
     os.makedirs(f"{STORAGE_DIR}/layer_target_indices", exist_ok=True)
@@ -211,8 +255,8 @@ def save_layer_target_indices(exp_id, layer, exp_path, top_k=0.05, random=False)
     
     safe.to_pickle(f"{save_path}/layer_{layer}_safe.pkl")
 
-def tpr_at_fpr(exp_id, fpr=0.001):
-    df = get_lira_scores(exp_id, n_shadows=32)
+def tpr_at_fpr(exp_id, fpr=0.001, target_id='target'):
+    df = get_lira_scores(exp_id, n_shadows=32, target_id=target_id)
 
     labels = df["target_trained_on"]
     results = []
@@ -221,6 +265,7 @@ def tpr_at_fpr(exp_id, fpr=0.001):
     fpr_values, tpr_values, thresholds = metrics.roc_curve(labels, scores)
     idx = (np.abs(fpr_values - fpr)).argmin()
     tpr_at_fpr = tpr_values[idx]
+    threshold_at_fpr = thresholds[idx]
 
     y_pred = scores > thresholds[idx]
     y_true = labels.astype(bool)
@@ -236,7 +281,38 @@ def tpr_at_fpr(exp_id, fpr=0.001):
         'tps': true_positives,
         'auc': auc,
         'precision': precision,
-        'recall': recall
+        'recall': recall,
+        'threshold_at_fpr': threshold_at_fpr
+    })
+
+    result_df = pd.DataFrame(results)
+    return result_df
+
+
+def tpr_at_threshold(df, threshold=0.5):
+
+    labels = df["target_trained_on"]
+    results = []
+    scores = df['lira_score']
+    
+    y_pred = scores > threshold
+    y_true = labels.astype(bool)
+    true_positives = np.sum((y_pred == 1) & (y_true == 1))
+    
+    precision = metrics.precision_score(labels, y_pred)
+    recall = metrics.recall_score(labels, y_pred)
+    auc = metrics.roc_auc_score(labels, scores)
+    
+    tpr_at_threshold = np.sum(y_true & y_pred) / np.sum(y_true)
+
+    results.append({
+        'attack': 'LiRA',
+        'tpr_at_threshold': tpr_at_threshold,
+        'tps': true_positives,
+        'auc': auc,
+        'precision': precision,
+        'recall': recall,
+        'threshold': threshold
     })
 
     result_df = pd.DataFrame(results)
@@ -250,7 +326,8 @@ def calculate_roc(df: pd.DataFrame, cols=["lira_score", "attackr_score", "rmia_s
     roc_data = {}
     for target_col in cols:
         fpr, tpr, _ = metrics.roc_curve(df['target_trained_on'], df[target_col])
-        roc_data[target_col] = (fpr, tpr)
+        auc = metrics.auc(fpr, tpr)
+        roc_data[target_col] = (fpr, tpr, auc)
     return roc_data
 
 
@@ -263,7 +340,7 @@ def plot_roc(exp_id, save_path=None):
     df = get_lira_scores(exp_id, n_shadows=32)
     roc_data = calculate_roc(df, cols=["lira_score"])
     plt.figure(figsize=(8, 6))
-    for label, (fpr, tpr) in roc_data.items():
+    for label, (fpr, tpr, auc) in roc_data.items():
         if label == "rmia_score":
             label = "RMIA"
         elif label == "attackr_score":
@@ -290,35 +367,25 @@ def plot_roc(exp_id, save_path=None):
     plt.show()    
 
 
-def plot_multi_roc(exp_ids_target, ideal_indices, save_path=None):
+def plot_multi_roc(exp_ids_target, save_name=None):
     """
     Plots ROC curves from roc_data (dict of {label: (fpr, tpr)}).
     Optionally, extra_curves (list of (fpr, tpr)) and extra_labels (list of str)
     can be provided.
     """
-    # df = get_lira_scores(exp_id, n_shadows=32)
-    # roc_data = calculate_roc(df, cols=["lira_score"])
-    # plt.figure(figsize=(8, 6))
-    # for label, (fpr, tpr) in roc_data.items():
-    #     if label == "lira_score":
-    #         label = "LiRA"
-    #     plt.plot(fpr, tpr, label=label)
+
     plt.figure(figsize=(8, 6))
     plt.style.use("plot_style.mplstyle")
     for exp_id, target, label in exp_ids_target:
         df = get_lira_scores(exp_id, target_id=target, n_shadows=32)
-        if label == 'ideal':
-            df = df.iloc[ideal_indices]
         roc_data = calculate_roc(df, cols=["lira_score"])
-        for _, (fpr, tpr) in roc_data.items():
-            plt.plot(fpr, tpr, label=f"{label})")
+        for _, (fpr, tpr, auc) in roc_data.items():
+            if label == "Ideal":
+                plt.plot(fpr, tpr, label=f"{label} (AUC = {auc:.2f})", linestyle='--')
+            else:
+                plt.plot(fpr, tpr, label=f"{label} (AUC = {auc:.2f})")
 
-    plt.plot(
-        [0, 1], [0, 1],
-        linestyle='--',
-        color='gray',
-        label='Random Guessing'
-    )
+
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
     plt.legend()
@@ -326,10 +393,9 @@ def plot_multi_roc(exp_ids_target, ideal_indices, save_path=None):
     plt.yscale("log")
     plt.ylim(bottom=0.001)
     plt.xlim(left=0.001)
-    plt.grid(True)
-    if save_path:
-        plt.savefig(save_path, bbox_inches='tight', dpi=300)
-    plt.show()    
+    if save_name:
+        plt.savefig(f"./figures/{save_name}.png", bbox_inches='tight', dpi=300)
+    plt.show()
 
 
 

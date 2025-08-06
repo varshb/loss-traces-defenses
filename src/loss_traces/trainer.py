@@ -44,7 +44,7 @@ class Trainer:
         return training_params
 
     def get_all_losses(self, model, args):
-        # model.eval()
+        model.eval()
 
         all_losses = []
         all_confs = []
@@ -100,7 +100,7 @@ class Trainer:
             if args.track_grad_norms:
                 grad_norms.append(norms)
 
-
+        model.train()
         for batch_idx, (inputs, targets, indices) in enumerate(self.trainloader):
             model.zero_grad()
             self.optimizer.zero_grad()
@@ -127,6 +127,7 @@ class Trainer:
 
         if (args.track_computed_loss or args.track_confidences or args.track_grad_norms):
             losses, confs, norms = self.get_all_losses(model, args)
+            model.train()
             if args.track_computed_loss:
                 computed_losses.append(losses)
             if args.track_confidences:
@@ -140,6 +141,66 @@ class Trainer:
         acc = (100. * float(correct) / float(total)) if total > 0 else 0.0
         print('Time: %d s' % (t1 - t0), 'train acc:', acc, end=' ')
         return acc
+    
+    def train_epoch_clipping(self, model, epoch, computed_losses, computed_confidences, grad_norms, args):
+        print(f'\n{args.exp_id}-Epoch: %d' % epoch)
+        model.train()
+        total = 0
+        correct = 0
+        t0 = time.time()
+
+        # collect init losses
+        if (args.track_computed_loss or args.track_confidences or args.track_grad_norms) and epoch == 0:
+            losses, confs, norms = self.get_all_losses(model, args)
+            if args.track_computed_loss:
+                computed_losses.append(losses)
+            if args.track_confidences:
+                computed_confidences.append(confs)
+            if args.track_grad_norms:
+                grad_norms.append(norms)
+
+
+        for batch_idx, (inputs, targets, indices) in enumerate(self.trainloader):
+            model.zero_grad()
+            self.optimizer.zero_grad()
+            if isinstance(self.optimizer, DPOptimizer):
+                self.optimizer.expected_batch_size = inputs.shape[0]
+
+            inputs, targets = inputs.to(self.device), targets.to(self.device)
+
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                outputs = model(inputs).squeeze(-1).squeeze(-1)
+
+            losses = self.loss_func_sample(outputs, targets)
+            if args.track_free_loss:
+                self.free_train_losses.loc[indices.tolist(), epoch] = losses.tolist()
+
+            losses.mean().backward()
+            print(model.fc.weight.grad_sample) 
+            self.optimizer.step()
+
+            _, predicted = torch.max(outputs.data, 1)
+            minibatch_correct = predicted.eq(targets.data).float().cpu()
+            total += targets.size(0)
+            correct += minibatch_correct.sum()
+
+        if (args.track_computed_loss or args.track_confidences or args.track_grad_norms):
+            losses, confs, norms = self.get_all_losses(model, args)
+            if args.track_computed_loss:
+                computed_losses.append(losses)
+            if args.track_confidences:
+                computed_confidences.append(confs)
+            if args.track_grad_norms:
+                grad_norms.append(norms)
+
+
+        t1 = time.time()
+        self.scheduler.step()
+        acc = (100. * float(correct) / float(total)) if total > 0 else 0.0
+        print('Time: %d s' % (t1 - t0), 'train acc:', acc, end=' ')
+        return acc
+
 
     def train_test(self, model, args, model_id):
         self.training_params = self.get_training_params(model)

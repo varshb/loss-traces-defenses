@@ -267,7 +267,6 @@ class AttackPipelineRunner:
         cmd = [
             "python3", "-m", "loss_traces.main",
             "--arch", self.arch,
-            "--track_computed_loss",  # Required for attack
             "--gpu", self.gpu,
             "--dataset", self.dataset,
             "--seed", str(self.seed),

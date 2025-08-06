@@ -303,6 +303,7 @@ def get_train_indices(args, dataset: Dataset, num_classes: int, subset_indices: 
     ## For a target model
     elif args.track_computed_loss or args.track_free_loss:
         if args.balanced_sampling:
+            print("Using balanced sampling for target model")
             class_indices = {i: [] for i in range(num_classes)}
             for _, label, idx in dataset:
                 class_indices[label].append(idx)
