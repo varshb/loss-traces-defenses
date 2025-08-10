@@ -1,5 +1,7 @@
 import torchgeo.datasets
 import torchvision
+import torchvision.transforms as transforms
+import torch
 import os
 from PIL import Image
 
@@ -21,6 +23,33 @@ class IndexCIFAR10(torchvision.datasets.CIFAR10):
             target = self.target_transform(target)
         return img, target, index
     
+
+
+class MultiAugmentDataset(torchvision.datasets.CIFAR10):
+    def __init__(self, *args, augmult=4, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.augmult = augmult
+
+    def __getitem__(self, index):
+        img, target = self.data[index], self.targets[index]
+
+        # doing this so that it is consistent with all other datasets
+        # to return a PIL Image
+        img = Image.fromarray(img)
+
+        augmented_imgs = []
+        for _ in range(self.augmult):
+            if self.transform:
+                augmented_imgs.append(self.transform(img))
+            else:
+                augmented_imgs.append(transforms.ToTensor()(img))
+
+        # Shape: (K, C, H, W)
+        augmented_imgs = torch.stack(augmented_imgs, dim=0)
+        return augmented_imgs, torch.tensor(target), index
+    
+
+
 class IndexCIFAR100(torchvision.datasets.CIFAR100):
     def __getitem__(self, index):
         img, target = self.data[index], self.targets[index]
@@ -33,6 +62,9 @@ class IndexCIFAR100(torchvision.datasets.CIFAR100):
         if self.target_transform is not None:
             target = self.target_transform(target)
         return img, target, index
+
+
+
 
 class IndexCINIC10(torchvision.datasets.VisionDataset):
     classes=["airplane",

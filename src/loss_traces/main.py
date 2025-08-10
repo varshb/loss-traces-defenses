@@ -194,7 +194,7 @@ def main():
 
                 safe_indices = list(safe_indices)
 
-                trainloader, plainloader, testloader = prepare_loaders(
+                trainloader, plainloader, testloader, augloader = prepare_loaders(
                     train_superset, plain_train_superset, testset, num_classes, safe_indices, None, args
                 )
                 print("Len after removing: ", len(trainloader.dataset))
@@ -205,12 +205,12 @@ def main():
                 with open(save_path, "rb") as f:
                     non_vulnerable = pickle.load(f)
                 non_vulnerable = list(non_vulnerable['og_idx'])
-                trainloader, plainloader, testloader = prepare_loaders(
+                trainloader, plainloader, testloader, augloader = prepare_loaders(
                     train_superset, plain_train_superset, testset, num_classes, None, non_vulnerable, args
                 )
         else:  # first model
             print("Using full training set - no vulnerable points")
-            trainloader, plainloader, testloader = prepare_loaders(
+            trainloader, plainloader, testloader, augloader = prepare_loaders(
                 train_superset, plain_train_superset, testset, num_classes, None, None, args
             )
 
@@ -229,7 +229,7 @@ def main():
         if args.clip_norm or args.private or args.track_grad_norms:
             model = ModuleValidator.fix(model)
 
-        trainer = Trainer(args, (trainloader, plainloader, testloader), device)
+        trainer = Trainer(args, (trainloader, plainloader, testloader, augloader), device)
         trainer.train_test(model, args, model_id)
     print("\n==> Finished training")
 

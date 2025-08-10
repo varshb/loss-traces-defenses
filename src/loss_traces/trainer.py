@@ -14,7 +14,7 @@ from loss_traces.config import MODEL_DIR, STORAGE_DIR
 class Trainer:
     def __init__(self, args, dataloaders, device):
         self.args = args
-        self.trainloader, self.plainloader, self.testloader = dataloaders
+        self.trainloader, self.plainloader, self.testloader, self.augloader = dataloaders
         self.num_epochs = args.epochs
         self.device = device
         self.loss_func = torch.nn.CrossEntropyLoss()
@@ -68,18 +68,18 @@ class Trainer:
             m = target_confs - pred_confs
             all_confs.extend(m.tolist())
 
-            losses.mean().backward()
-            if args.track_grad_norms or args.clip_norm:
-                batch_grads = [p.grad_sample.view(p.grad_sample.size(0), -1) for p in self.training_params]
-                batch_norms = torch.cat(batch_grads, dim=1).norm(dim=1)
-                all_norms.append(batch_norms)
+            # losses.mean().backward()
+            # if args.track_grad_norms or args.clip_norm:
+            #     batch_grads = [p.grad_sample.view(p.grad_sample.size(0), -1) for p in self.training_params]
+            #     batch_norms = torch.cat(batch_grads, dim=1).norm(dim=1)
+            #     all_norms.append(batch_norms)
 
         # all_losses = torch.cat(all_losses, dim=0)
-        if args.clip_norm or args.track_grad_norms:
-            all_norms = torch.cat(all_norms, dim=0)
-            if args.clip_norm:
-                all_norms = all_norms.clamp(max=args.clip_norm)
-            all_norms = all_norms.tolist()
+        # if args.clip_norm or args.track_grad_norms:
+        #     all_norms = torch.cat(all_norms, dim=0)
+        #     if args.clip_norm:
+        #         all_norms = all_norms.clamp(max=args.clip_norm)
+        #     all_norms = all_norms.tolist()
         return all_losses, all_confs, all_norms
 
 
@@ -100,30 +100,61 @@ class Trainer:
             if args.track_grad_norms:
                 grad_norms.append(norms)
 
-        model.train()
-        for batch_idx, (inputs, targets, indices) in enumerate(self.trainloader):
+        if args.augmult:
+            model.train()
             model.zero_grad()
             self.optimizer.zero_grad()
-            if isinstance(self.optimizer, DPOptimizer):
-                self.optimizer.expected_batch_size = inputs.shape[0]
 
-            inputs, targets = inputs.to(self.device), targets.to(self.device)
+            N, K, C, H, W = inputs.shape  # unpack
+            inputs = inputs.to(self.device)           # [N, K, C, H, W]
+            targets = targets.to(self.device)         # [N]
+
+            # Flatten augmentations into batch dimension
+            inputs = inputs.view(N*K, C, H, W)         # [N*K, C, H, W]
+            targets_flat = targets.repeat_interleave(K)  # [N*K]
+
+            if isinstance(self.optimizer, DPOptimizer):
+                self.optimizer.expected_batch_size = inputs.shape[0]  # N*K
 
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                outputs = model(inputs).squeeze(-1).squeeze(-1)
+                outputs = model(inputs).squeeze(-1).squeeze(-1)  # [N*K, num_classes]
 
-            losses = self.loss_func_sample(outputs, targets)
-            if args.track_free_loss:
-                self.free_train_losses.loc[indices.tolist(), epoch] = losses.tolist()
+            # Per-sample losses
+            losses = self.loss_func_sample(outputs, targets_flat)  # [N*K]
 
-            losses.mean().backward()
+            # Reshape to [N, K] and average over augmentations
+            losses = losses.view(N, K)
+            loss = losses.mean(dim=1).mean()  # avg over K, then over N
+
+            # Backward + step
+            loss.backward()
             self.optimizer.step()
+        else:
+            for batch_idx, (inputs, targets, indices) in enumerate(self.trainloader):
+                model.train()
+                model.zero_grad()
+                self.optimizer.zero_grad()
+                if isinstance(self.optimizer, DPOptimizer):
+                    self.optimizer.expected_batch_size = inputs.shape[0]
 
-            _, predicted = torch.max(outputs.data, 1)
-            minibatch_correct = predicted.eq(targets.data).float().cpu()
-            total += targets.size(0)
-            correct += minibatch_correct.sum()
+                inputs, targets = inputs.to(self.device), targets.to(self.device)
+
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore')
+                    outputs = model(inputs).squeeze(-1).squeeze(-1)
+
+                losses = self.loss_func_sample(outputs, targets)
+                if args.track_free_loss:
+                    self.free_train_losses.loc[indices.tolist(), epoch] = losses.tolist()
+
+                losses.mean().backward()
+                self.optimizer.step()
+
+                _, predicted = torch.max(outputs.data, 1)
+                minibatch_correct = predicted.eq(targets.data).float().cpu()
+                total += targets.size(0)
+                correct += minibatch_correct.sum()
 
         if (args.track_computed_loss or args.track_confidences or args.track_grad_norms):
             losses, confs, norms = self.get_all_losses(model, args)

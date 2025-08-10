@@ -278,7 +278,7 @@ class AttackPipelineRunner:
             "--momentum", str(self.momentum),
             "--exp_id", self.exp_id,
             "--shadow_count", str(self.n_shadows),
-            "--model_start", "0",
+            "--model_start", str(existing_count),
             "--model_stop", str(self.n_shadows),
             "--layer", str(self.layer),  # Layer index for removed vulnerable points
             "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",

@@ -33,11 +33,11 @@ def main(args):
         "seed": args.seed,
         "save_model": True
         }
-        teacher_exp_id = "wrn28-2_CIFAR_5_l0"
-        student_exp_id = "wrn28-2_CIFAR_5_l0"
+        teacher_exp_id = "CIFAR_top5_l0"
+        student_exp_id = "CIFAR_top5_l0"
         temp = 2.0
         weight = 0.5
-        epochs = 50
+        epochs = 100
         print(f"Running baseline CIFAR experiment with temp={temp} and weight={weight}")
 
         acc = run_kd_experiment(config, teacher_exp_id, student_exp_id, temp, weight, epochs)
@@ -58,8 +58,8 @@ def main(args):
         "seed": args.seed,
         "save_model": False
         }
-        teacher_exp_id = "wrn28-2_CIFAR_5_l0"
-        student_exp_id = "wrn28-2_CIFAR_5_l0"
+        teacher_exp_id = "CIFAR_top5_l0"
+        student_exp_id = "CIFAR_top5_l0"
         temp = 2.0
         weight = 0.5
         
@@ -80,23 +80,32 @@ def main(args):
         x = [e for e, a in results]
         y = [a for e, a in results]
 
+        results_dict = {}
+        for e, a in results:
+            if e not in results_dict:
+                results_dict[e] = []
+            results_dict[e].append(a)
+
+        avg_y = {e: np.mean(a) for e, a in results_dict.items()}
+            
         plt.scatter(x, y)
+        plt.plot(list(avg_y.keys()), list(avg_y.values()), color='red', alpha=0.5, label='Average Accuracy')
         plt.xlabel("Epochs")
         plt.ylabel("Accuracy")
         plt.title(f"Epochs vs Accuracy (temp={temp}, weight={weight})")
-        plt.grid(True)
+        plt.grid(linestyle='--', alpha=0.5)
         plt.savefig("epochs_vs_accuracy.png")
         plt.show()
 
     elif args.ablation:
         # Add your ablation study code here
-        # temperatures = [1.0, 2.0, 4.0]
-        # weights = [0.1, 0.3, 0.5, 0.7, 0.9]
-        # student_ids = ["wrn28-2_CIFAR_5_l2", "wrn28-2_CIFAR_5_l3", "wrn28-2_CIFAR_5_l4", "wrn28-2_CIFAR_5_l5", "wrn28-2_CIFAR_5_l6"]
+        temperatures = [1.0, 2.0, 4.0]
+        weights = [0.1, 0.3, 0.5, 0.7, 0.9]
+        student_ids = ["CIFAR_top5_l2", "CIFAR_top5_l3", "CIFAR_top5_l4", "CIFAR_top5_l5", "CIFAR_top5_l6"]
         # test run
-        temperatures = [1.0]
-        weights = [0.5]
-        student_ids = ["wrn28-2_CIFAR_5_l0"]
+        # temperatures = [1.0]
+        # weights = [0.5]
+        # student_ids = ["wrn28-2_CIFAR_5_l0"]
         print(f"Running {len(temperatures)} temperature and {len(weights)} weight ablation study with {len(student_ids)} student models")
         total_trials = len(temperatures) * len(weights) * len(student_ids)
         print(f"Total trials: {total_trials}")
@@ -118,7 +127,7 @@ def main(args):
                 for student_exp_id in student_ids:
                     print(f"Running KD experiment with temp={temp}, weight={weight}, student_exp_id={student_exp_id}")
                     start_time = time.time()
-                    acc = run_kd_experiment(config, teacher_exp_id, student_exp_id, temp, weight, epochs=5)
+                    acc = run_kd_experiment(config, teacher_exp_id, student_exp_id, temp, weight, epochs=100)
                     print(f"KD experiment completed with accuracy: {acc}")
                     print(f"Time taken: {time.time() - start_time:.2f} seconds")
                     time_taken[(temp, weight, student_exp_id)] = time.time() - start_time
@@ -138,7 +147,6 @@ def run_kd_experiment(config, teacher_exp_id, student_exp_id, temp, weight, epoc
     student = load_model(config["arch"], get_num_classes(config["dataset"])).to(
         config["device"])
     student_saves = torch.load(f"{MODEL_DIR}/{student_exp_id}/target", weights_only=False)
-    student.load_state_dict(student_saves["model_state_dict"])
 
     if config['verbose']:
         print(f"Loaded teacher model from {teacher_exp_id} and student model from {student_exp_id}")
@@ -170,7 +178,9 @@ def run_kd_experiment(config, teacher_exp_id, student_exp_id, temp, weight, epoc
     )
 
     # load optimizer
-    optimizer = torch.optim.Adam(student.parameters(), lr=0.1)
+    weight_decay = 5e-4
+    optimizer = torch.optim.SGD(student.parameters(), lr=0.1, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     # train model
     for epoch in range(epochs):
@@ -180,6 +190,7 @@ def run_kd_experiment(config, teacher_exp_id, student_exp_id, temp, weight, epoc
             student_model=student,
             train_loader=train_loader,
             optimizer=optimizer,
+            scheduler=scheduler,
             device=config['device'],
             temperature=temp,
             alpha=weight
@@ -202,7 +213,7 @@ def run_kd_experiment(config, teacher_exp_id, student_exp_id, temp, weight, epoc
     )
 
     if config['save_model']:
-        dict = {
+        save_dict = {
         'model_state_dict': student.state_dict(),
         'trained_on_indices': student_saves['trained_on_indices'],
         'arch': student_saves['arch'],
@@ -215,9 +226,11 @@ def run_kd_experiment(config, teacher_exp_id, student_exp_id, temp, weight, epoc
         }
 
         exp_id = f"{student_exp_id}_kd_temp_{temp}_weight_{weight}"
-        os.makedirs(f"trained_models/models/{exp_id}", exist_ok=True)
-        torch.save(dict, f"trained_models/models/{exp_id}/target")
-        print(f"Saved model to trained_models/models/{exp_id}/target")
+        dir = f"trained_models/models/kd/"
+        os.makedirs(dir, exist_ok=True)
+        fullpath = os.path.join(dir, exp_id)
+        torch.save(save_dict, fullpath)
+        print(f"Saved model to {fullpath}")
 
     return acc
 
@@ -251,7 +264,7 @@ def load_data(config, saves):
     return train_loader, test_loader, num_classes
 
 def train_epoch(teacher_model, student_model, train_loader, 
-                                  optimizer, device, temperature=3.0, 
+                                  optimizer, scheduler, device, temperature=3.0, 
                                   alpha=0.7):
     """
     Train student with confidence-masked knowledge distillation
@@ -287,7 +300,8 @@ def train_epoch(teacher_model, student_model, train_loader,
         epoch_stats['ce_loss'] += ce_loss.item()
         epoch_stats['kd_loss'] += kd_loss.item()
         
-            
+    scheduler.step()
+
     for key in epoch_stats:
         epoch_stats[key] /= len(train_loader)
     
@@ -323,12 +337,9 @@ class KnowledgeDistillation(nn.Module):
         
     def forward(self, student_logits, teacher_logits, targets):
         ce_loss = self.ce_loss(student_logits, targets)
-        
-        # Apply confidence masking to teacher logits
-        masked_teacher_logits = teacher_logits / self.temperature
-        
+                
         # Knowledge distillation 
-        soft_targets = F.softmax(masked_teacher_logits / self.temperature, dim=1)
+        soft_targets = F.softmax(teacher_logits / self.temperature, dim=1)
         soft_predictions = F.log_softmax(student_logits / self.temperature, dim=1)
         
         kd_loss = F.kl_div(soft_predictions, soft_targets, reduction='batchmean') * (self.temperature ** 2)

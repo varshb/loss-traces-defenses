@@ -235,6 +235,7 @@ def save_layer_target_indices(exp_id, layer, exp_path, top_k=0.05, random=False)
         vulnerable = top_score[:idx]['og_idx']
         safe = top_score[idx:]['og_idx']
     else:
+        np.random.seed(42)  # For reproducibility
         og_idx = top_score['og_idx'].values
         random_sample = np.random.choice(og_idx, size=idx, replace=False)
         vulnerable = top_score[top_score['og_idx'].isin(random_sample)]['og_idx']

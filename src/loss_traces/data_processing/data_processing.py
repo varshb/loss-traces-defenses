@@ -15,11 +15,12 @@ from loss_traces.data_processing.custom_dataset import (
     IndexCINIC10,
     IndexCIFAR100Coarse,
     IndexRESISC45,
+    MultiAugmentDataset
 )
 
 
 def prepare_transform(
-    dataset_name: str, arch: str, augment: bool = False, mirror_all: bool = False
+    dataset_name: str, arch: str, augment: bool = False, mirror_all: bool = False, apply_augmult: bool = False
 ):
     """
     Prepare transforms for a given dataset and architecture.
@@ -63,6 +64,18 @@ def prepare_transform(
                         transforms.Normalize(
                             (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
                         ),
+                    ]
+                )
+            elif apply_augmult:
+                return transforms.Compose(
+                        [
+                            transforms.RandomHorizontalFlip(),
+                            transforms.RandomResizedCrop(32),
+                            transforms.ColorJitter(0.4, 0.4, 0.4, 0.1),
+                            transforms.ToTensor(),
+                            transforms.Normalize(
+                                (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                            ),
                     ]
                 )
             return transforms.Compose(
@@ -176,6 +189,10 @@ def get_trainset(dataset_name: str, transform: transforms.Compose) -> Dataset:
         )
     elif dataset_name == "RESISC45":
         dataset = IndexRESISC45(root=DATA_DIR, split="train_val", transforms=transform)
+    elif dataset_name == "MultiAugmentDataset":
+        dataset = MultiAugmentDataset(
+            root=DATA_DIR, train=True, augmult=8, transform=transform, download=True
+        )
     else:
         raise NotImplementedError(f"Trainset '{dataset_name}' is not supported")
     return dataset
@@ -264,8 +281,16 @@ def prepare_loaders(
         num_workers=workers,
         pin_memory=True,
     )
-    return trainloader, plainloader, testloader
 
+    augloader = DataLoader(
+        dataset,
+        batch_size=args.batchsize,
+        shuffle=True,
+        num_workers=workers,
+        pin_memory=True,
+    )
+    return trainloader, plainloader, testloader, augloader
+    
 
 def get_train_indices(args, dataset: Dataset, num_classes: int, subset_indices: list = None) -> List[int]:
     ## Some special sampling
