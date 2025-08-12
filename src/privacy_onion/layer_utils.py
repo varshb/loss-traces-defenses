@@ -219,7 +219,7 @@ def plot_kde_lira(exp_ids, save_name=None):
     plt.show()
 
 
-def save_layer_target_indices(exp_id, layer, exp_path, top_k=0.05, random=False):
+def save_layer_target_indices(exp_id, layer, exp_path, top_k=0.05, sd_value=2, method='top_k'):
     os.makedirs(f"{STORAGE_DIR}/layer_target_indices", exist_ok=True)
 
     save_path = f"{STORAGE_DIR}/layer_target_indices/{exp_path}"
@@ -231,26 +231,46 @@ def save_layer_target_indices(exp_id, layer, exp_path, top_k=0.05, random=False)
     top_score = members.sort_values(by='lt_iqr', ascending=False)
 
     idx = int(len(top_score) * top_k)
-    if random is False:
+    if method == 'top_k':
         vulnerable = top_score[:idx]['og_idx']
         safe = top_score[idx:]['og_idx']
-    else:
+    elif method == 'random':
         np.random.seed(42)  # For reproducibility
         og_idx = top_score['og_idx'].values
         random_sample = np.random.choice(og_idx, size=idx, replace=False)
         vulnerable = top_score[top_score['og_idx'].isin(random_sample)]['og_idx']
         safe = top_score[~top_score['og_idx'].isin(random_sample)]['og_idx']
+    elif method == 'sd_removal':
+        # vulnerable points are points greater than k sd
+        mean = top_score['lt_iqr'].mean()
+        std = top_score['lt_iqr'].std()
+        vulnerable = top_score[(top_score['lt_iqr'] > mean + sd_value * std)]['og_idx']
+        safe = top_score[~top_score['og_idx'].isin(vulnerable)]['og_idx']
+    elif method == 'lira':
+        # remove TPs identified by lira
+        df_lira = get_lira_scores(exp_id, n_shadows=32)
+        labels = df_lira["target_trained_on"]
+        scores = df_lira['lira_score']
 
+        fpr_values, tpr_values, thresholds = metrics.roc_curve(labels, scores)
+        idx = (np.abs(fpr_values - 0.001)).argmin()
 
-    # create safe fulset that is all prev_ safe fulset - vulnerable if layer > 0, if not then len(idx) - vulnerable
+        y_pred = scores > thresholds[idx]
+        y_true = labels.astype(bool)
+        vulnerable = df_lira[y_pred & y_true]['og_idx']
+        safe = top_score[~top_score['og_idx'].isin(vulnerable)]['og_idx']
 
+    # create safe fulset that is all prev_safe fulset - vulnerable if layer > 0, if not then len(idx) - vulnerable
     if layer > 0:
         prev_safe = pd.read_pickle(f"{save_path}/layer_{layer - 1}_full_safe.pkl")
         full_safe = prev_safe[~prev_safe['og_idx'].isin(vulnerable)]
+        prev_vulnerable = pd.read_pickle(f"{save_path}/layer_{layer - 1}_vulnerable.pkl")
+        vulnerable = pd.concat([vulnerable, prev_vulnerable])
     else:
         full_safe = pd.DataFrame({'og_idx': np.arange(len(df))})
         full_safe = full_safe[~full_safe['og_idx'].isin(vulnerable)]
 
+    vulnerable.to_pickle(f"{save_path}/layer_{layer}_vulnerable.pkl")
     full_safe.to_pickle(
         f"{save_path}/layer_{layer}_full_safe.pkl")
     
@@ -405,14 +425,15 @@ if __name__ == "__main__":
     parser.add_argument("--exp_id", type=str, required=True, help="Experiment ID")
     parser.add_argument("--layer", type=int, required=True, help="Layer number")
     parser.add_argument("--top_k", type=float, default=0.05, help="Top k percentage for target indices")
-    parser.add_argument("--exp_path", type=str, help="Path to the experiment directory")
+    parser.add_argument("--exp_path", type=str, help="Path to store indices")
     parser.add_argument(
-        "--random",
-        action="store_true",
-        default=False,
-        help="If set, randomly select target indices instead of using top k",
+        "--method",
+        type=str,
+        choices=["top_k", "random", "sd_removal", "lira"],
+        help="Method to use for selecting target indices"
     )
+    parser.add_argument("--sd_value", type=float, default=2.0, help="Standard deviation for sd_removal method")
 
     args = parser.parse_args()
 
-    save_layer_target_indices(args.exp_id, args.layer, args.exp_path, args.top_k, args.random)
+    save_layer_target_indices(args.exp_id, args.layer, args.exp_path, args.top_k, args.sd_value, args.method)

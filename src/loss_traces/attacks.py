@@ -173,7 +173,7 @@ class MembershipInferenceAttack:
             - Training indices from the saved model
         """
         saves = torch.load(model_path, map_location=self.device, weights_only=False)
-        
+        print(model_path)
         # Check if DP model is needed
         if self._is_dp_model_needed(saves['hyperparameters']):
             self.model = self._convert_to_dp_model(self.model)

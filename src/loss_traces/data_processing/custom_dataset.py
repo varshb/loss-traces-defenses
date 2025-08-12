@@ -26,9 +26,10 @@ class IndexCIFAR10(torchvision.datasets.CIFAR10):
 
 
 class MultiAugmentDataset(torchvision.datasets.CIFAR10):
-    def __init__(self, *args, augmult=4, **kwargs):
+    def __init__(self, *args, augmult=4, non_aug_transform=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.augmult = augmult
+        self.non_aug_transform = non_aug_transform
 
     def __getitem__(self, index):
         img, target = self.data[index], self.targets[index]
@@ -38,7 +39,13 @@ class MultiAugmentDataset(torchvision.datasets.CIFAR10):
         img = Image.fromarray(img)
 
         augmented_imgs = []
-        for _ in range(self.augmult):
+        if self.transform:
+            # No augmentation for first image in list, just normalise if applicabkle
+            augmented_imgs.append(self.non_aug_transform(img))
+        else:
+            augmented_imgs.append(transforms.ToTensor()(img))
+
+        for _ in range(self.augmult - 1):
             if self.transform:
                 augmented_imgs.append(self.transform(img))
             else:

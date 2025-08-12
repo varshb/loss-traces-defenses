@@ -172,7 +172,7 @@ def prepare_transform(
     raise NotImplementedError(f"Dataset {dataset_name} is not supported")
 
 
-def get_trainset(dataset_name: str, transform: transforms.Compose) -> Dataset:
+def get_trainset(dataset_name: str, transform: transforms.Compose, non_aug_transform: transforms.Compose = None) -> Dataset:
     if dataset_name == "CIFAR10":
         dataset = IndexCIFAR10(
             root=DATA_DIR, train=True, transform=transform, download=True
@@ -191,7 +191,7 @@ def get_trainset(dataset_name: str, transform: transforms.Compose) -> Dataset:
         dataset = IndexRESISC45(root=DATA_DIR, split="train_val", transforms=transform)
     elif dataset_name == "MultiAugmentDataset":
         dataset = MultiAugmentDataset(
-            root=DATA_DIR, train=True, augmult=8, transform=transform, download=True
+            root=DATA_DIR, train=True, augmult=4, transform=transform,non_aug_transform=non_aug_transform, download=True
         )
     else:
         raise NotImplementedError(f"Trainset '{dataset_name}' is not supported")
@@ -240,22 +240,33 @@ def get_no_shuffle_train_loader(
 
 
 def prepare_loaders(
-    dataset: Dataset, plain_dataset: Dataset, testset: Dataset, num_classes: int, indices: list, non_vulnerable: list, args
-) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    if indices is not None:
+    dataset: Dataset, plain_dataset: Dataset, testset: Dataset, aug_dataset: Dataset, num_classes: int, nonvuln_target: list, vuln_target: list,  shadow_subset_train: bool, args
+) -> Tuple[DataLoader, DataLoader, DataLoader, DataLoader]:
+    if nonvuln_target is not None and shadow_subset_train is False:
+        diff = [i for i in vuln_target if i in nonvuln_target]
+        print(len(diff))
         print("Using provided indices for training set")
-        trainset = Subset(dataset, indices)
-    elif non_vulnerable is not None:
+        if args.selective_clip:
+            vuln_dataset = Subset(dataset, vuln_target)
+            aug_vuln = Subset(aug_dataset, vuln_target)
+        trainset = Subset(dataset, nonvuln_target)
+        aug_dataset = Subset(aug_dataset, nonvuln_target)
+
+    elif shadow_subset_train:
         print("Using provided non-vulnerable indices for shadow training")
+        non_vulnerable = [i for i in range(len(dataset)) if i not in vuln_target]
         select_indices = get_train_indices(
             args, dataset, num_classes, subset_indices=non_vulnerable
         )
+
         trainset = Subset(dataset, select_indices)
+        aug_dataset = Subset(aug_dataset, select_indices)
     else:
         print("Using default sampling for training set")
         select_indices = get_train_indices(args, dataset, num_classes)
 
         trainset = Subset(dataset, select_indices)
+        aug_dataset = Subset(aug_dataset, select_indices)
         print("trainset length: ", len(trainset))
 
     workers = 4
@@ -283,14 +294,32 @@ def prepare_loaders(
     )
 
     augloader = DataLoader(
-        dataset,
+        aug_dataset,
         batch_size=args.batchsize,
         shuffle=True,
         num_workers=workers,
         pin_memory=True,
     )
-    return trainloader, plainloader, testloader, augloader
+    if args.selective_clip:
+        vulnloader = DataLoader(
+            vuln_dataset,
+            batch_size=args.batchsize,
+            shuffle=True,
+            num_workers=workers,
+            pin_memory=True,
+        )
+        aug_vulnloader = DataLoader(
+            aug_vuln,
+            batch_size=args.batchsize,
+            shuffle=True,
+            num_workers=workers,
+            pin_memory=True,
+        )
+
+        return trainloader, plainloader, testloader, augloader, vulnloader, aug_vulnloader
     
+    return trainloader, plainloader, testloader, augloader, None, None
+
 
 def get_train_indices(args, dataset: Dataset, num_classes: int, subset_indices: list = None) -> List[int]:
     ## Some special sampling

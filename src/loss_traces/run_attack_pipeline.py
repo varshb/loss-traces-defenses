@@ -29,7 +29,8 @@ class AttackPipelineRunner:
                  n_shadows: int = 64, epochs: int = 100, gpu: str = "", seed: int = 2546,
                  # Differential Privacy parameters
                  private: bool = False, clip_norm: float = None, noise_multiplier: float = None,
-                 target_epsilon: float = None, target_delta: float = 1e-5, layer: int = 0, layer_folder: Optional[str] = None):
+                 target_epsilon: float = None, target_delta: float = 1e-5, layer: int = 0, layer_folder: Optional[str] = None,
+                 augmult: bool = False, selective_clip: bool = False):
         """
         Initialize the pipeline runner.
         
@@ -59,7 +60,7 @@ class AttackPipelineRunner:
         self.layer_folder = layer_folder
         
         # Training hyperparameters
-        self.batchsize = 256 
+        self.batchsize = 512 if private else 256
         self.lr = 0.1
         self.epochs = epochs
         self.weight_decay = 5e-4
@@ -71,7 +72,9 @@ class AttackPipelineRunner:
         self.noise_multiplier = noise_multiplier
         self.target_epsilon = target_epsilon
         self.target_delta = target_delta
-        
+        self.augmult = augmult
+        self.selective_clip = selective_clip
+
         # Paths
         self.model_dir = Path(MODEL_DIR) / self.exp_id
         self.storage_dir = Path(STORAGE_DIR)
@@ -207,7 +210,7 @@ class AttackPipelineRunner:
         cmd = [
             "python3", "-m", "loss_traces.main",
             "--arch", self.arch,
-            "--track_computed_loss",  # Required for attack
+            # "--track_computed_loss",  # Required for attack
             "--gpu", self.gpu,
             "--dataset", self.dataset,
             "--seed", str(self.seed),
@@ -221,7 +224,11 @@ class AttackPipelineRunner:
             "--layer", str(self.layer),  # Layer index for removed vulnerable points
             "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",
         ]
-        
+
+        if self.augmult:
+            cmd.extend(["--augmult"])
+        if self.selective_clip:
+            cmd.extend(["--selective_clip"])
         # Add differential privacy parameters if specified
         if self.private:
             cmd.extend(["--private"])
@@ -284,6 +291,10 @@ class AttackPipelineRunner:
             "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",
         ]
         
+        if self.augmult:
+            cmd.extend(["--augmult"])
+        if self.selective_clip:
+            cmd.extend(["--selective_clip"])
         # Add differential privacy parameters if specified
         if self.private:
             cmd.extend(["--private"])
@@ -587,7 +598,10 @@ Examples:
                       help="Target epsilon for DP (privacy budget)")
     parser.add_argument("--target_delta", type=float, default=1e-5,
                       help="Target delta for DP (default: 1e-5)")
-    
+    parser.add_argument("--augmult", action="store_true",
+                      help="Enable data augmentation multiplicatively")
+    parser.add_argument("--selective_clip", action="store_true",
+                      help="Enable selective clipping")
     # Pipeline control
     parser.add_argument("--full", action="store_true",
                       help="Run the complete pipeline end-to-end (all attacks)")
@@ -633,7 +647,9 @@ Examples:
         target_epsilon=args.target_epsilon,
         target_delta=args.target_delta,
         layer=args.layer,
-        layer_folder=args.layer_folder if args.layer > 0 else None
+        layer_folder=args.layer_folder if args.layer > 0 else None,
+        augmult=args.augmult,
+        selective_clip=args.selective_clip
     )
     
     # Execute requested operation

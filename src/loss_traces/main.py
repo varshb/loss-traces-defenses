@@ -133,6 +133,13 @@ def parse_input():
         default="",
         help="folder name for storing layer indices (default: empty)",
     )
+    parser.add_argument(
+        "--augmult",
+        action="store_true",
+        help="Enable data augmentation multiplicatively"
+    )
+    parser.add_argument("--selective_clip", action="store_true",
+                      help="Enable selective clipping")
 
     args = parser.parse_args()
 
@@ -156,6 +163,8 @@ def set_seed(seed=0):
 
 def main():
     args = parse_input()
+    if args.augmult:
+        print("Using multiplicative data augmentation")
     print("Arguments: ", args)
 
     device = "cuda" + args.gpu if torch.cuda.is_available() else "cpu"
@@ -163,10 +172,12 @@ def main():
 
     train_transform = prepare_transform(args.dataset, args.arch, args.augment)
     plain_transform = prepare_transform(args.dataset, args.arch)
+    aug_transform = prepare_transform(args.dataset, args.arch, apply_augmult=True)
 
     start = time.time()
     train_superset = get_trainset(args.dataset, train_transform)
     plain_train_superset = get_trainset(args.dataset, plain_transform)
+    aug_dataset = get_trainset("MultiAugmentDataset", aug_transform, plain_transform)
     testset = get_testset(args.dataset, plain_transform)
     stop = time.time()
     print(f"Loading datasets took {stop - start}")
@@ -180,38 +191,50 @@ def main():
         print("==> Preparing data..")
         num_classes = get_num_classes(args.dataset)
         if args.layer > 0:
+            vuln_path = (
+                    f"{STORAGE_DIR}/layer_target_indices/"
+                    f"{args.layer_folder}/layer_{args.layer-1}_vulnerable.pkl"
+                )
+            with open(vuln_path, "rb") as f:
+                vulnerable = pickle.load(f)
+            vulnerable = list(vulnerable)
+            save_path = (
+                    f"{STORAGE_DIR}/layer_target_indices/"
+                    f"{args.layer_folder}/layer_{args.layer-1}_safe.pkl"
+                )
+            print(f"Loading safe indices from: {save_path}")
+            with open(save_path, "rb") as f:
+                nonvuln_target = pickle.load(f)
+
+            nonvuln_target = list(nonvuln_target)
+            print(len(nonvuln_target), " non-vulnerable points loaded")
+
             if args.shadow_count is None: # for target model
                 print(f"Removing vulnerable points from layer {args.layer}")
                 print("Len before removing: ", len(train_superset))
 
-                save_path = (
-                    f"{STORAGE_DIR}/layer_target_indices/"
-                    f"{args.layer_folder}/layer_{args.layer-1}_safe.pkl"
-                )
-                print(f"Loading safe indices from: {save_path}")
-                with open(save_path, "rb") as f:
-                    safe_indices = pickle.load(f)
 
-                safe_indices = list(safe_indices)
 
-                trainloader, plainloader, testloader, augloader = prepare_loaders(
-                    train_superset, plain_train_superset, testset, num_classes, safe_indices, None, args
+                trainloader, plainloader, testloader, augloader, vulnloader, aug_vulnloader = prepare_loaders(
+                    train_superset, plain_train_superset, testset, aug_dataset, num_classes, nonvuln_target, vulnerable, False, args
                 )
+
                 print("Len after removing: ", len(trainloader.dataset))
             else: # for shadow model training
                 print(f"Removing vulnerable points from layer {args.layer} for shadow model {args.shadow_id}")
                 print("Len before removing: ", len(train_superset))
-                save_path = f"{STORAGE_DIR}/layer_target_indices/{args.layer_folder}/layer_{args.layer-1}_full_safe.pkl"
-                with open(save_path, "rb") as f:
-                    non_vulnerable = pickle.load(f)
-                non_vulnerable = list(non_vulnerable['og_idx'])
-                trainloader, plainloader, testloader, augloader = prepare_loaders(
-                    train_superset, plain_train_superset, testset, num_classes, None, non_vulnerable, args
+                # save_path = f"{STORAGE_DIR}/layer_target_indices/{args.layer_folder}/layer_{args.layer-1}_full_safe.pkl"
+                # with open(save_path, "rb") as f:
+                #     non_vulnerable = pickle.load(f)
+                # non_vulnerable = list(non_vulnerable['og_idx'])
+                trainloader, plainloader, testloader, augloader, vulnloader, aug_vulnloader = prepare_loaders(
+                    train_superset, plain_train_superset, testset, aug_dataset, num_classes, nonvuln_target, vulnerable, True, args
                 )
+
         else:  # first model
             print("Using full training set - no vulnerable points")
-            trainloader, plainloader, testloader, augloader = prepare_loaders(
-                train_superset, plain_train_superset, testset, num_classes, None, None, args
+            trainloader, plainloader, testloader, augloader, vulnloader, aug_vulnloader = prepare_loaders(
+                train_superset, plain_train_superset, testset, aug_dataset, num_classes, None, None,False, args
             )
 
         num_training = len(trainloader.dataset)
@@ -226,10 +249,11 @@ def main():
 
         model = load_model(args.arch, num_classes).to(device)
 
-        if args.clip_norm or args.private or args.track_grad_norms:
+        # if (args.clip_norm or args.private or args.track_grad_norms) and not args.selective_clip:
+        if (args.clip_norm or args.private or args.track_grad_norms):
             model = ModuleValidator.fix(model)
+        trainer = Trainer(args, (trainloader, plainloader, testloader, augloader, vulnloader, aug_vulnloader), device)
 
-        trainer = Trainer(args, (trainloader, plainloader, testloader, augloader), device)
         trainer.train_test(model, args, model_id)
     print("\n==> Finished training")
 
