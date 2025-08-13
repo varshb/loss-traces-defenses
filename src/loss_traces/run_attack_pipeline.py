@@ -60,7 +60,7 @@ class AttackPipelineRunner:
         self.layer_folder = layer_folder
         
         # Training hyperparameters
-        self.batchsize = 512 if private else 256
+        self.batchsize =  256
         self.lr = 0.1
         self.epochs = epochs
         self.weight_decay = 5e-4

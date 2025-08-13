@@ -191,7 +191,7 @@ def get_trainset(dataset_name: str, transform: transforms.Compose, non_aug_trans
         dataset = IndexRESISC45(root=DATA_DIR, split="train_val", transforms=transform)
     elif dataset_name == "MultiAugmentDataset":
         dataset = MultiAugmentDataset(
-            root=DATA_DIR, train=True, augmult=4, transform=transform,non_aug_transform=non_aug_transform, download=True
+            root=DATA_DIR, train=True, augmult=8, transform=transform,non_aug_transform=non_aug_transform, download=True
         )
     else:
         raise NotImplementedError(f"Trainset '{dataset_name}' is not supported")
@@ -264,6 +264,7 @@ def prepare_loaders(
     else:
         print("Using default sampling for training set")
         select_indices = get_train_indices(args, dataset, num_classes)
+        print(select_indices[:500])
 
         trainset = Subset(dataset, select_indices)
         aug_dataset = Subset(aug_dataset, select_indices)
