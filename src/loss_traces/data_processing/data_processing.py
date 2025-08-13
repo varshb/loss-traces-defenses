@@ -270,7 +270,7 @@ def prepare_loaders(
         aug_dataset = Subset(aug_dataset, select_indices)
         print("trainset length: ", len(trainset))
 
-    workers = 4
+    workers = 6 if args.augmult else 4
 
     trainloader = DataLoader(
         trainset,
@@ -304,7 +304,7 @@ def prepare_loaders(
     if args.selective_clip:
         vulnloader = DataLoader(
             vuln_dataset,
-            batch_size=args.batchsize,
+            batch_size=2048,
             shuffle=True,
             num_workers=workers,
             pin_memory=True,

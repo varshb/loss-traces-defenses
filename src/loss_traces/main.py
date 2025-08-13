@@ -249,7 +249,6 @@ def main():
 
         model = load_model(args.arch, num_classes).to(device)
 
-        # if (args.clip_norm or args.private or args.track_grad_norms) and not args.selective_clip:
         if (args.clip_norm or args.private or args.track_grad_norms):
             model = ModuleValidator.fix(model)
         trainer = Trainer(args, (trainloader, plainloader, testloader, augloader, vulnloader, aug_vulnloader), device)

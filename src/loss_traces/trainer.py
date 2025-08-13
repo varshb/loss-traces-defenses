@@ -7,7 +7,9 @@ import pandas as pd
 import torch
 from opacus import PrivacyEngine, GradSampleModule
 from opacus.optimizers import DPOptimizer
+from opacus.utils.batch_memory_manager import BatchMemoryManager
 from opacus.data_loader import DPDataLoader
+from torch.amp import autocast, GradScaler
 
 import random
 from loss_traces.config import MODEL_DIR, STORAGE_DIR
@@ -101,8 +103,14 @@ class Trainer:
                 computed_confidences.append(confs)
             if args.track_grad_norms:
                 grad_norms.append(norms)
+        max_physical_batch_size = 256
         if args.augmult:
-            acc = self.train_augloaders_average_losses(model, self.trainloader, epoch)
+            with BatchMemoryManager(
+            data_loader=self.trainloader,
+            max_physical_batch_size=max_physical_batch_size,
+            optimizer=self.optimizer,
+            ) as memory_safe_dataloader:
+                acc = self.train_augloaders_average_losses(model, memory_safe_dataloader, epoch)
         else:
             for (inputs, targets, _) in self.trainloader:
                 correct, total = self.train_batch(model, inputs, targets, _, False,args)
@@ -156,7 +164,7 @@ class Trainer:
         
             for (inputs, targets, _), src in seed_random_interleave(self.trainloader, self.vulnloader, seed=epoch):  # randomise batches between loaders
                 if src == "A":
-                    correct, total = self.train_batch_selective_clipping(model, inputs, targets, _, True, args) ## NOTE: passing in True here for selective clipping for debugging
+                    correct, total = self.train_batch_selective_clipping(model, inputs, targets, _, False, args) ## NOTE: passing in True here for selective clipping for debugging
                     unclipped_correct += correct
                     unclipped_total += total
                 elif src == "B":
@@ -337,6 +345,7 @@ class Trainer:
         if epoch == 0:
             print(type(self.optimizer))
             print("training with augmentations")
+        scaler = GradScaler('cuda')
         for batch_idx, (inputs, targets, indices) in enumerate(dataloader):
             model.train()
             self.optimizer.zero_grad()
@@ -351,20 +360,24 @@ class Trainer:
             inputs_flat = inputs.view(N*K, C, H, W)  # [N*K, C, H, W]
             targets_flat = targets.repeat_interleave(K)  # [N*K]
             
-            outputs = model(inputs_flat)  
-            
-            losses = self.loss_func_sample(outputs, targets_flat)  # [N*K]
-            
-            # Reshape to N, K and average over augmentations
-            losses = losses.view(N, K)
-            per_sample_losses = losses.mean(dim=1)  # average over K augmentations 
-            
-            # Final loss
-            total_loss = per_sample_losses.mean()  
-            
-            # This is equivalent of taking avg of K gradients
-            total_loss.backward()
-            self.optimizer.step()
+            # Single forward pass for all N*K images 
+            with autocast('cuda'):
+                outputs = model(inputs_flat)  
+                
+                # Compute per-sample losses 
+                losses = self.loss_func_sample(outputs, targets_flat)  # [N*K]
+                
+                # Reshape to N, K and average over augmentations
+                losses = losses.view(N, K)
+                per_sample_losses = losses.mean(dim=1)  # average over K augmentations 
+                
+                # Final loss
+                total_loss = per_sample_losses.mean()  
+                
+                # This is equivalent of taking avg of K gradients
+            scaler.scale(total_loss).backward()
+            scaler.step(self.optimizer)
+            scaler.update()
 
             with torch.no_grad():
                 model.eval()
