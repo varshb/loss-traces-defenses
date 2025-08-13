@@ -391,6 +391,9 @@ class Trainer:
             total_correct += correct
             total_samples += N
 
+            if batch_idx % 25 == 0:
+                torch.cuda.empty_cache()  
+
         acc = 100.0 * total_correct / total_samples if total_samples > 0 else 0.0
         return acc
 

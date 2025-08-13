@@ -254,6 +254,8 @@ def main():
         trainer = Trainer(args, (trainloader, plainloader, testloader, augloader, vulnloader, aug_vulnloader), device)
 
         trainer.train_test(model, args, model_id)
+
+        del model
     print("\n==> Finished training")
 
 
