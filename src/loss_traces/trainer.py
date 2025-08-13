@@ -361,23 +361,21 @@ class Trainer:
             targets_flat = targets.repeat_interleave(K)  # [N*K]
             
             # Single forward pass for all N*K images 
-            with autocast('cuda'):
-                outputs = model(inputs_flat)  
+            outputs = model(inputs_flat)  
+            
+            # Compute per-sample losses 
+            losses = self.loss_func_sample(outputs, targets_flat)  # [N*K]
+            
+            # Reshape to N, K and average over augmentations
+            losses = losses.view(N, K)
+            per_sample_losses = losses.mean(dim=1)  # average over K augmentations 
+            
+            # Final loss
+            total_loss = per_sample_losses.mean()  
                 
-                # Compute per-sample losses 
-                losses = self.loss_func_sample(outputs, targets_flat)  # [N*K]
-                
-                # Reshape to N, K and average over augmentations
-                losses = losses.view(N, K)
-                per_sample_losses = losses.mean(dim=1)  # average over K augmentations 
-                
-                # Final loss
-                total_loss = per_sample_losses.mean()  
-                
-                # This is equivalent of taking avg of K gradients
-            scaler.scale(total_loss).backward()
-            scaler.step(self.optimizer)
-            scaler.update()
+            # This is equivalent of taking avg of K gradients
+            total_loss.backward()
+            self.optimizer.step()
 
             with torch.no_grad():
                 model.eval()
