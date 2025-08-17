@@ -60,7 +60,8 @@ class AttackPipelineRunner:
         self.layer_folder = layer_folder
         
         # Training hyperparameters
-        self.batchsize =  256
+        self.augmult = augmult
+        self.batchsize =  2048 if self.augmult else 256
         self.lr = 0.1
         self.epochs = epochs
         self.weight_decay = 5e-4
@@ -72,7 +73,6 @@ class AttackPipelineRunner:
         self.noise_multiplier = noise_multiplier
         self.target_epsilon = target_epsilon
         self.target_delta = target_delta
-        self.augmult = augmult
         self.selective_clip = selective_clip
 
         # Paths
@@ -224,7 +224,8 @@ class AttackPipelineRunner:
             "--layer", str(self.layer),  # Layer index for removed vulnerable points
             "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",
         ]
-
+        if not self.augmult:
+            cmd.extend(["--track_computed_loss"])
         if self.augmult:
             cmd.extend(["--augmult"])
         if self.selective_clip:

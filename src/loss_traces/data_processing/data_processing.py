@@ -191,7 +191,7 @@ def get_trainset(dataset_name: str, transform: transforms.Compose, non_aug_trans
         dataset = IndexRESISC45(root=DATA_DIR, split="train_val", transforms=transform)
     elif dataset_name == "MultiAugmentDataset":
         dataset = MultiAugmentDataset(
-            root=DATA_DIR, train=True, augmult=8, transform=transform,non_aug_transform=non_aug_transform, download=True
+            root=DATA_DIR, train=True, augmult=2, transform=transform,non_aug_transform=non_aug_transform, download=True
         )
     else:
         raise NotImplementedError(f"Trainset '{dataset_name}' is not supported")
@@ -261,16 +261,19 @@ def prepare_loaders(
 
         trainset = Subset(dataset, select_indices)
         aug_dataset = Subset(aug_dataset, select_indices)
+        if args.selective_clip:
+            print(len(vuln_target), " vulnerable points loaded")
+            vuln_dataset = Subset(dataset, vuln_target)
+            aug_vuln = Subset(aug_dataset, vuln_target)
     else:
         print("Using default sampling for training set")
         select_indices = get_train_indices(args, dataset, num_classes)
-        print(select_indices[:500])
 
         trainset = Subset(dataset, select_indices)
         aug_dataset = Subset(aug_dataset, select_indices)
         print("trainset length: ", len(trainset))
 
-    workers = 6 if args.augmult else 4
+    workers = 4 if args.augmult else 4
 
     trainloader = DataLoader(
         trainset,
@@ -304,7 +307,7 @@ def prepare_loaders(
     if args.selective_clip:
         vulnloader = DataLoader(
             vuln_dataset,
-            batch_size=2048,
+            batch_size=args.batchsize,
             shuffle=True,
             num_workers=workers,
             pin_memory=True,
