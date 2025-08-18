@@ -412,9 +412,9 @@ class Trainer:
 
     def train_aug_batches(self, model, inputs, targets, indices, should_clip, args):
 
-        if args.selective_clipping and should_clip:
+        if args.selective_clip and should_clip:
             self.optimizer._should_clip_current_batch = True
-        elif args.selective_clipping and not should_clip:
+        elif args.selective_clip and not should_clip:
             self.optimizer._should_clip_current_batch = False
 
         model.train()
