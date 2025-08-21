@@ -30,7 +30,7 @@ class AttackPipelineRunner:
                  # Differential Privacy parameters
                  private: bool = False, clip_norm: float = None, noise_multiplier: float = None,
                  target_epsilon: float = None, target_delta: float = 1e-5, layer: int = 0, layer_folder: Optional[str] = None,
-                 augmult: bool = False, selective_clip: bool = False):
+                 augmult: int = 0, selective_clip: bool = False):
         """
         Initialize the pipeline runner.
         
@@ -61,7 +61,6 @@ class AttackPipelineRunner:
         
         # Training hyperparameters
         self.augmult = augmult
-        self.batchsize =  2048 if self.augmult else 256
         self.lr = 0.1
         self.epochs = epochs
         self.weight_decay = 5e-4
@@ -74,6 +73,7 @@ class AttackPipelineRunner:
         self.target_epsilon = target_epsilon
         self.target_delta = target_delta
         self.selective_clip = selective_clip
+        self.batchsize = 256
 
         # Paths
         self.model_dir = Path(MODEL_DIR) / self.exp_id
@@ -224,10 +224,10 @@ class AttackPipelineRunner:
             "--layer", str(self.layer),  # Layer index for removed vulnerable points
             "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",
         ]
-        if not self.augmult:
+        if self.augmult == 0:
             cmd.extend(["--track_computed_loss"])
-        if self.augmult:
-            cmd.extend(["--augmult"])
+        if self.augmult > 0:
+            cmd.extend(["--augmult", str(self.augmult)])
         if self.selective_clip:
             cmd.extend(["--selective_clip"])
         # Add differential privacy parameters if specified
@@ -292,8 +292,8 @@ class AttackPipelineRunner:
             "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",
         ]
         
-        if self.augmult:
-            cmd.extend(["--augmult"])
+        if self.augmult > 0:
+            cmd.extend(["--augmult", str(self.augmult)])
         if self.selective_clip:
             cmd.extend(["--selective_clip"])
         # Add differential privacy parameters if specified
@@ -599,7 +599,7 @@ Examples:
                       help="Target epsilon for DP (privacy budget)")
     parser.add_argument("--target_delta", type=float, default=1e-5,
                       help="Target delta for DP (default: 1e-5)")
-    parser.add_argument("--augmult", action="store_true",
+    parser.add_argument("--augmult", type=int, default=0,
                       help="Enable data augmentation multiplicatively")
     parser.add_argument("--selective_clip", action="store_true",
                       help="Enable selective clipping")

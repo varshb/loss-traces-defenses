@@ -9,11 +9,12 @@ import opacus
 import pickle
 from opacus import PrivacyEngine, GradSampleModule
 from opacus.optimizers import DPOptimizer
+from opacus.optimizers import DPOptimizerFastGradientClipping
 from opacus.utils.batch_memory_manager import BatchMemoryManager
 from opacus.data_loader import DPDataLoader
 import loss_traces.augmult_utils
 import torchvision.transforms.v2
-
+from torchvision.transforms.v2 import functional as F
 import random
 from loss_traces.config import MODEL_DIR, STORAGE_DIR
 
@@ -26,6 +27,10 @@ class Trainer:
         self.device = device
         self.loss_func = torch.nn.CrossEntropyLoss()
         self.loss_func_sample = torch.nn.CrossEntropyLoss(reduction='none')
+
+        torch.backends.cudnn.benchmark = True  # Auto-tune convolution algorithms
+        torch.backends.cuda.matmul.allow_tf32 = True  # Faster matmuls on A100/RTX
+        torch.backends.cudnn.allow_tf32 = True
 
     @staticmethod
     def get_optimizer(training_params, lr, momentum, weight_decay):
@@ -110,7 +115,7 @@ class Trainer:
                 grad_norms.append(norms)
 
 
-        max_physical_batch_size = 64
+        max_physical_batch_size = 128
 
         if args.augmult:
             with BatchMemoryManager(
@@ -149,6 +154,7 @@ class Trainer:
         self.scheduler.step()
         print('Time: %d s' % (t1 - t0), 'train acc:', acc, end=' ')
         print("Clipped samples:", clipped_samples)
+        print("Total Samples", total_samples)
         return acc
 
     def train_epoch_selective_clip(self, model, epoch, computed_losses, computed_confidences, grad_norms, args):
@@ -172,10 +178,10 @@ class Trainer:
         clipped_correct, clipped_total = 0, 0
         unclipped_correct, unclipped_total = 0, 0
         clipped_samples = 0
-        if args.augmult: 
+        if args.augmult > 0: 
             for (inputs, targets, _), src in seed_random_interleave(self.trainloader, self.vulnloader, seed=epoch):  # randomise batches between loaders
                 if src == "A":
-                    correct, total, _, _ = self.train_batch_selective_clipping(model, inputs, targets, _, False, args) ## NOTE: passing in True here for selective clipping for debugging
+                    correct, total, _, _ = self.train_batch_selective_clipping(model, inputs, targets, _, False, args) 
                     unclipped_correct += correct
                     unclipped_total += total
                 elif src == "B":
@@ -231,8 +237,9 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, args.epochs)
 
 
-        if args.augmult:
-            self.augmult_factor = 16
+        if args.augmult > 0:
+            self.augmult_factor = args.augmult
+            print("training with augmult:", self.augmult_factor)
             if args.selective_clip:
                 print("training with augmult and selective clipping")
                 pass # not impelmeneted yet
@@ -248,8 +255,14 @@ class Trainer:
 
             elif (args.clip_norm or args.noise_multiplier) and not args.selective_clip:
                 print("training with augmult and clipping")
-                pass
-            
+                self.privacy_engine = loss_traces.augmult_utils.PrivacyEngineAugmented(opacus.GradSampleModule.GRAD_SAMPLERS)
+                model, self.optimizer, self.trainloader= self.privacy_engine.make_private(max_grad_norm=args.clip_norm if args.clip_norm else 0.0,
+                                            module=model,
+                                            optimizer=self.optimizer,
+                                            data_loader=self.trainloader,
+                                            noise_multiplier=args.noise_multiplier if args.noise_multiplier else 0.0,
+                                            )
+
             augmentation = loss_traces.augmult_utils.AugmentationMultiplicity(self.augmult_factor)
             model.GRAD_SAMPLERS[torch.nn.modules.conv.Conv2d] = augmentation.augmented_compute_conv_grad_sample
             model.GRAD_SAMPLERS[torch.nn.modules.linear.Linear] = augmentation.augmented_compute_linear_grad_sample
@@ -336,6 +349,17 @@ class Trainer:
 
         print('\n==> Finished training')
 
+        save_model(model, args, self.trainloader, train_acc, test_acc)
+
+        if args.noise_multiplier:
+            delta = 1e-5
+            if noise_mult < 1.0:
+                alphas = [1 + x / 1000.0 for x in range(1, 500)] + [1 + x / 10.0 for x in range(1, 100)]
+            else:
+                alphas = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
+            epsilon, optimal_alpha = privacy_engine.get_epsilon(delta=1e-5, alphas=alphas)
+            print(f"Noise: {noise_mult}, Epsilon: {epsilon:.3f}, Optimal Alpha: {optimal_alpha}")
+
         if args.track_free_loss:
             save_free_loss(self.free_train_losses, args)
 
@@ -348,14 +372,13 @@ class Trainer:
         if args.track_grad_norms:
             save_tracking_data(grad_norms, args, save_dir="grad_norms")
 
-        save_model(model, args, self.trainloader, train_acc, test_acc)
-        
         if args.clip_norm:
             train_dir = os.path.join(STORAGE_DIR, 'selective_losses')
             os.makedirs(train_dir, exist_ok=True)
             file = args.exp_id
             with open(os.path.join(train_dir, f'{file}_metrics.pkl'), 'wb') as f:
                 pickle.dump(self.metrics, f)
+        
 
     def test(self, model, args):
         model.eval()
@@ -421,7 +444,7 @@ class Trainer:
         # model.zero_grad()
         self.optimizer.zero_grad(set_to_none=True)
 
-        inputs, targets = inputs.to(self.device), targets.to(self.device)
+        inputs, targets = inputs.to(self.device, non_blocking=True), targets.to(self.device, non_blocking=True)
 
         original_batch_size = inputs.size(0)
         batch_xs = torch.repeat_interleave(inputs, repeats=self.augmult_factor, dim=0)
@@ -434,12 +457,14 @@ class Trainer:
         )
         batch_xs = torchvision.transforms.v2.Lambda(lambda x: torch.stack([transform(x_) for x_ in x]))(batch_xs
         )
-        assert batch_xs.size(0) == self.augmult_factor * original_batch_size
+        loss_func = torch.compile(self.loss_func_sample)
 
-        pred = model(batch_xs)
-        loss = self.loss_func_sample(pred, batch_ys)
-        loss.mean().backward()
-        clipped, clipped_total = get_clipping_stats_from_optimizer(self.optimizer)
+        assert batch_xs.size(0) == self.augmult_factor * original_batch_size
+        with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+            pred = model(batch_xs)
+            loss = loss_func(pred, batch_ys)
+            loss.mean().backward()
+        clipped, clipped_total = 0, 0
 
         self.optimizer.step()
         

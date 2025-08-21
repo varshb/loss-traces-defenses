@@ -47,12 +47,20 @@ from opacus.accountants import create_accountant
 from opacus.accountants.utils import get_noise_multiplier
 from opacus.data_loader import DPDataLoader, switch_generator
 from opacus.distributed import DifferentiallyPrivateDistributedDataParallel as DPDDP
+from opacus.utils.fast_gradient_clipping_utils import DPLossFastGradientClipping
+from torch.distributed._composable.fsdp import FSDPModule
 from opacus.layers.dp_rnn import DPRNNBase, DPRNNCellBase, RNNLinear
 from opacus.optimizers import DPOptimizer, get_optimizer_class
 from opacus.schedulers import _NoiseScheduler
 from opacus.utils.module_utils import (
     requires_grad,
     trainable_modules,
+)
+from opacus.grad_sample import (
+    AbstractGradSampleModule,
+    GradSampleModule,
+    get_gsm_class,
+    wrap_model,
 )
 from opacus.utils.tensor_utils import unfold2d, sum_over_all_but_batch_and_last_n
 from opacus.validators.module_validator import ModuleValidator
@@ -647,6 +655,26 @@ class PrivacyEngineAugmented:
                 module, self.GRAD_SAMPLERS, batch_first=batch_first, loss_reduction=loss_reduction, K=K
             )
             return ret
+    
+    def _prepare_criterion(
+        self,
+        *,
+        module: GradSampleModule,
+        optimizer: DPOptimizer,
+        criterion=nn.CrossEntropyLoss(),
+        loss_reduction: str = "mean",
+        **kwargs,
+    ) -> DPLossFastGradientClipping:
+        """
+        Args:
+            module: GradSampleModule used for training,
+            optimizer: DPOptimizer used for training,
+            criterion: Loss function used for training,
+            loss_reduction: "mean" or "sum", indicates if the loss reduction (for aggregating the gradients)
+
+        Prepare the DP loss class, which packages the two backward passes for fast gradient clipping.
+        """
+        return DPLossFastGradientClipping(module, optimizer, criterion, loss_reduction)
 
     def is_compatible(
         self,
@@ -723,6 +751,8 @@ class PrivacyEngineAugmented:
         clipping: str = "flat",
         noise_generator=None,
         K=0,
+        grad_sample_mode: str = "hooks",
+        criterion=nn.CrossEntropyLoss(),
     ) -> Tuple[GradSampleModuleAugmented, DPOptimizer, DataLoader]:
         """
         Add privacy-related responsibilites to the main PyTorch training objects:
@@ -827,7 +857,14 @@ class PrivacyEngineAugmented:
         )
 
         optimizer.attach_step_hook(self.accountant.get_optimizer_hook_fn(sample_rate=sample_rate))
-
+        if "ghost" in grad_sample_mode:
+            criterion = self._prepare_criterion(
+                module=module,
+                optimizer=optimizer,
+                criterion=criterion,
+                loss_reduction=loss_reduction,
+            )
+            return module, optimizer, criterion, data_loader
         return module, optimizer, data_loader
 
     def make_private_with_epsilon(

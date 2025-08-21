@@ -135,7 +135,8 @@ def parse_input():
     )
     parser.add_argument(
         "--augmult",
-        action="store_true",
+        type=int,
+        default=0,
         help="Enable data augmentation multiplicatively"
     )
     parser.add_argument("--selective_clip", action="store_true",
@@ -163,7 +164,7 @@ def set_seed(seed=0):
 
 def main():
     args = parse_input()
-    if args.augmult:
+    if args.augmult > 0:
         print("Using multiplicative data augmentation")
     print("Arguments: ", args)
 
