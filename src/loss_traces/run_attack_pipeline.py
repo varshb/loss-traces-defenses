@@ -73,7 +73,7 @@ class AttackPipelineRunner:
         self.target_epsilon = target_epsilon
         self.target_delta = target_delta
         self.selective_clip = selective_clip
-        self.batchsize = 256
+        self.batchsize = 1024 if self.private else 256
 
         # Paths
         self.model_dir = Path(MODEL_DIR) / self.exp_id

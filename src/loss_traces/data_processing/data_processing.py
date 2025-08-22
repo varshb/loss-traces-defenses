@@ -273,7 +273,7 @@ def prepare_loaders(
         aug_dataset = Subset(aug_dataset, select_indices)
         print("trainset length: ", len(trainset))
 
-    workers = min(16, os.cpu_count())
+    workers = min(6, os.cpu_count())
     print(f"Using {workers} workers for data loading")
 
     trainloader = DataLoader(

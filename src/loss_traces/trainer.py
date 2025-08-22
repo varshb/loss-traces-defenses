@@ -261,6 +261,7 @@ class Trainer:
                                             optimizer=self.optimizer,
                                             data_loader=self.trainloader,
                                             noise_multiplier=args.noise_multiplier if args.noise_multiplier else 0.0,
+                                            K=self.augmult_factor
                                             )
 
             augmentation = loss_traces.augmult_utils.AugmentationMultiplicity(self.augmult_factor)
@@ -351,14 +352,6 @@ class Trainer:
 
         save_model(model, args, self.trainloader, train_acc, test_acc)
 
-        if args.noise_multiplier:
-            delta = 1e-5
-            if noise_mult < 1.0:
-                alphas = [1 + x / 1000.0 for x in range(1, 500)] + [1 + x / 10.0 for x in range(1, 100)]
-            else:
-                alphas = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
-            epsilon, optimal_alpha = privacy_engine.get_epsilon(delta=1e-5, alphas=alphas)
-            print(f"Noise: {noise_mult}, Epsilon: {epsilon:.3f}, Optimal Alpha: {optimal_alpha}")
 
         if args.track_free_loss:
             save_free_loss(self.free_train_losses, args)
@@ -378,6 +371,11 @@ class Trainer:
             file = args.exp_id
             with open(os.path.join(train_dir, f'{file}_metrics.pkl'), 'wb') as f:
                 pickle.dump(self.metrics, f)
+
+        if args.noise_multiplier:
+            epsilon = self.privacy_engine.get_epsilon(delta=1e-5)
+            print(f"Noise: {args.noise_multiplier}, Epsilon: {epsilon:.3f}")
+
         
 
     def test(self, model, args):
@@ -455,16 +453,14 @@ class Trainer:
             torchvision.transforms.v2.RandomHorizontalFlip(),
         ]
         )
-        batch_xs = torchvision.transforms.v2.Lambda(lambda x: torch.stack([transform(x_) for x_ in x]))(batch_xs
-        )
-        loss_func = torch.compile(self.loss_func_sample)
+        batch_xs = torchvision.transforms.v2.Lambda(lambda x: torch.stack([transform(x_) for x_ in x]))(batch_xs)
 
         assert batch_xs.size(0) == self.augmult_factor * original_batch_size
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             pred = model(batch_xs)
-            loss = loss_func(pred, batch_ys)
+            loss = self.loss_func_sample(pred, batch_ys)
             loss.mean().backward()
-        clipped, clipped_total = 0, 0
+            clipped, clipped_total = 0, 0
 
         self.optimizer.step()
         
