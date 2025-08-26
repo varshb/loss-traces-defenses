@@ -253,18 +253,27 @@ def prepare_loaders(
         aug_dataset = Subset(aug_dataset, nonvuln_target)
 
     elif shadow_subset_train:
-        print("Using provided non-vulnerable indices for shadow training")
         non_vulnerable = [i for i in range(len(dataset)) if i not in vuln_target]
         select_indices = get_train_indices(
             args, dataset, num_classes, subset_indices=non_vulnerable
         )
 
-        trainset = Subset(dataset, select_indices)
-        aug_dataset = Subset(aug_dataset, select_indices)
         if args.selective_clip:
-            print(len(vuln_target), " vulnerable points loaded")
-            vuln_dataset = Subset(dataset, vuln_target)
-            aug_vuln = Subset(aug_dataset, vuln_target)
+            print("using provided  indices ")
+            select_indices = get_train_indices(
+            args, dataset, num_classes)
+            train = [i for i in select_indices if i not in vuln_target]
+            vuln = [i for i in select_indices if i in vuln_target]
+
+            trainset = Subset(dataset, train)
+            print("Train set not for clipping:", len(trainset))
+            vuln_dataset = Subset(dataset, vuln)
+            print("Trainset for clipping:", len(vuln_dataset))
+            aug_vuln = Subset(aug_dataset, vuln)
+        else:
+            print("Using provided non-vulnerable indices for shadow training")
+            trainset = Subset(dataset, select_indices)
+            aug_dataset = Subset(aug_dataset, select_indices)
     else:
         print("Using default sampling for training set")
         select_indices = get_train_indices(args, dataset, num_classes)

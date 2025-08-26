@@ -30,7 +30,9 @@ class AttackPipelineRunner:
                  # Differential Privacy parameters
                  private: bool = False, clip_norm: float = None, noise_multiplier: float = None,
                  target_epsilon: float = None, target_delta: float = 1e-5, layer: int = 0, layer_folder: Optional[str] = None,
-                 augmult: int = 0, selective_clip: bool = False):
+                 augmult: int = 0, selective_clip: bool = False,
+                 model_start: int = None, model_stop: int = None,
+                 batchsize: int = None):
         """
         Initialize the pipeline runner.
         
@@ -58,10 +60,11 @@ class AttackPipelineRunner:
         self.seed = seed
         self.layer = layer  # Layer index for removed vulnerable points
         self.layer_folder = layer_folder
-        
+        self.model_start = model_start
+        self.model_stop = model_stop
+
         # Training hyperparameters
         self.augmult = augmult
-        self.lr = 0.1
         self.epochs = epochs
         self.weight_decay = 5e-4
         self.momentum = 0.9
@@ -73,7 +76,11 @@ class AttackPipelineRunner:
         self.target_epsilon = target_epsilon
         self.target_delta = target_delta
         self.selective_clip = selective_clip
-        self.batchsize = 1024 if self.private else 256
+        if batchsize is None:
+            self.batchsize = 1024 if self.noise_multiplier else 256
+        else:
+            self.batchsize = batchsize
+        self.lr = 0.1
 
         # Paths
         self.model_dir = Path(MODEL_DIR) / self.exp_id
@@ -271,7 +278,12 @@ class AttackPipelineRunner:
             return True
         elif existing_count > 0:
             print(f"Found {existing_count}/{self.n_shadows} existing shadow models")
-            
+
+        if self.model_start is None:
+            self.model_start = str(existing_count)
+        if self.model_stop is None:
+            self.model_stop = str(self.n_shadows)
+
         cmd = [
             "python3", "-m", "loss_traces.main",
             "--arch", self.arch,
@@ -286,8 +298,8 @@ class AttackPipelineRunner:
             "--momentum", str(self.momentum),
             "--exp_id", self.exp_id,
             "--shadow_count", str(self.n_shadows),
-            "--model_start", str(existing_count),
-            "--model_stop", str(self.n_shadows),
+            "--model_start", str(self.model_start),
+            "--model_stop", str(self.model_stop),
             "--layer", str(self.layer),  # Layer index for removed vulnerable points
             "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",
         ]
@@ -368,7 +380,7 @@ class AttackPipelineRunner:
         return_code = self._run_command(
             cmd,
             f"Running {attack_type} attack on {self.exp_id}",
-            timeout=3600  # 1 hour timeout
+            timeout=8000  # 1 hour timeout
         )
         
         return return_code == 0
@@ -588,6 +600,12 @@ Examples:
                       help="Layer index for removed vulnerable points (default: 0)")
     parser.add_argument("--layer_folder", type=str, default=None,
                       help="Folder to retrieve layer-indices from, if applicable")
+    parser.add_argument("--model_start", type=int, default=None,
+                      help="Starting model index for shadow training (default: None)")
+    parser.add_argument("--model_stop", type=int, default=None,
+                        help="Stopping model index for shadow training (default: None)")
+    parser.add_argument("--batchsize", type=int, default=None,
+                      help="Batch size for training (default: 256)")
     # Differential Privacy arguments
     parser.add_argument("--private", action="store_true",
                       help="Enable differential privacy training")
@@ -650,7 +668,10 @@ Examples:
         layer=args.layer,
         layer_folder=args.layer_folder if args.layer > 0 else None,
         augmult=args.augmult,
-        selective_clip=args.selective_clip
+        selective_clip=args.selective_clip,
+        model_start=args.model_start,
+        model_stop=args.model_stop,
+        batchsize=args.batchsize
     )
     
     # Execute requested operation

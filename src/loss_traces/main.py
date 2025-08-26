@@ -213,9 +213,6 @@ def main():
             if args.shadow_count is None: # for target model
                 print(f"Removing vulnerable points from layer {args.layer}")
                 print("Len before removing: ", len(train_superset))
-
-
-
                 trainloader, plainloader, testloader, augloader, vulnloader, aug_vulnloader = prepare_loaders(
                     train_superset, plain_train_superset, testset, aug_dataset, num_classes, nonvuln_target, vulnerable, False, args
                 )

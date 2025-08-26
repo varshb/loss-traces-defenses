@@ -143,6 +143,8 @@ class MembershipInferenceAttack:
             get_num_classes(self.config.dataset)
         ).to(self.device)
 
+
+
         return model, attack_loaders
     
     def _is_dp_model_needed(self, hyperparameters: Dict) -> bool:
@@ -177,10 +179,14 @@ class MembershipInferenceAttack:
         # Check if DP model is needed
         if self._is_dp_model_needed(saves['hyperparameters']):
             self.model = self._convert_to_dp_model(self.model)
+            if self.config.layer > 0:
+                raise ValueError("DP models with layer attacks are not supported.")
+
             
         # Load state dictionary
         self.model.load_state_dict(saves['model_state_dict'], strict=strict)
-        
+        # print("trianed on indices", len(saves['trained_on_indices']))
+
         return self.model, saves['trained_on_indices']
 
     def _collect_shadow_model_data(self, metrics=["losses", "logits", "scaled_logits"]) -> Tuple[

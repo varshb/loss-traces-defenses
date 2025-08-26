@@ -1100,6 +1100,8 @@ def _get_batch_size(*, module: nn.Module, grad_sample: torch.Tensor, batch_dim: 
 class AugmentationMultiplicity:
     def __init__(self, K):
         self.K = K
+        self.compute_grad_samples = True  
+
 
     def augmented_compute_conv_grad_sample(
         self,
@@ -1114,6 +1116,10 @@ class AugmentationMultiplicity:
             activations: Activations
             backprops: Backpropagations
         """
+        if not self.compute_grad_samples:
+            # Return empty dict - no per-sample gradients needed
+            return {}
+
         n = activations.shape[0]
         activations = unfold2d(
             activations,
@@ -1159,12 +1165,21 @@ class AugmentationMultiplicity:
         if layer.bias is not None and layer.bias.requires_grad:
             ret[layer.bias] = torch.einsum("nkoq->no", backprops)
 
+        for param, grad_tensor in ret.items():
+            if hasattr(grad_tensor, '_processed'):
+                print(f"WARNING: grad_tensor for {param} already has _processed flag!")
+                # Remove the flag
+                delattr(grad_tensor, '_processed')
+    
         return ret
 
     def augmented_compute_expand_grad_sample(self, layer, activations, backprops):
         """
         Computes per sample gradients for expand layers.
         """
+        if not self.compute_grad_samples:
+            # Return empty dict - no per-sample gradients needed
+            return {}
         return {layer.weight: backprops.reshape((-1, self.K) + (backprops.shape[1:])).sum(1)}
 
     def augmented_compute_linear_grad_sample(
@@ -1177,6 +1192,9 @@ class AugmentationMultiplicity:
             activations: Activations
             backprops: Backpropagations
         """
+        if not self.compute_grad_samples:
+            # Return empty dict - no per-sample gradients needed
+            return {}
         ret = {}
         activations = activations.reshape(
             (
@@ -1212,6 +1230,9 @@ class AugmentationMultiplicity:
             activations: Activations
             backprops: Backpropagations
         """
+        if not self.compute_grad_samples:
+            # Return empty dict - no per-sample gradients needed
+            return {}
         ret = {}
         if layer.weight.requires_grad:
             normalize_activations = F.group_norm(activations, layer.num_groups, eps=layer.eps)
@@ -1247,6 +1268,9 @@ class AugmentationMultiplicity:
             activations: Activations
             backprops: Backpropagations
         """
+        if not self.compute_grad_samples:
+            # Return empty dict - no per-sample gradients needed
+            return {}
         ret = {}
         if layer.weight.requires_grad:
             normalize_activations = F.layer_norm(activations, layer.normalized_shape, eps=layer.eps)
@@ -1281,33 +1305,3 @@ def trainable_parameters(module):
     yield from ((p_name, p) for (p_name, p) in module.named_parameters() if p.requires_grad)
 
 
-def create_ema(model: torch.nn.Module) -> torch.nn.Module:
-    ema = copy.deepcopy(model)
-    for param in ema.parameters():
-        param.detach_()
-    return ema
-
-
-def update_ema(model: torch.nn.Module, ema: torch.nn.Module, t, decay=0.9999, change_ema_decay_end=0):
-    t2 = t - change_ema_decay_end if t > change_ema_decay_end else t
-
-    effective_decay = min(decay, (1 + t2) / (10 + t2))
-    model_params = collections.OrderedDict(model.named_parameters())
-    ema_params = collections.OrderedDict(ema.named_parameters())
-    # check if both model contains the same set of keys
-    assert model_params.keys() == ema_params.keys()
-
-    for name, param in model_params.items():
-        # see https://www.tensorflow.org/api_docs/python/tf/train/ExponentialMovingAverage
-        # ema_variable -= (1 - decay) * (ema_variable - variable)
-        ema_params[name].sub_((1.0 - effective_decay) * (ema_params[name] - param))
-
-    model_buffers = collections.OrderedDict(model.named_buffers())
-    ema_buffers = collections.OrderedDict(ema.named_buffers())
-
-    # check if both model contains the same set of keys
-    assert model_buffers.keys() == ema_buffers.keys()
-
-    for name, buffer in model_buffers.items():
-        # buffers are copied
-        ema_buffers[name].copy_(buffer)

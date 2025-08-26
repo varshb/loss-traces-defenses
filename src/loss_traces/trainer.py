@@ -1,4 +1,5 @@
 import os
+from pyexpat import model
 import sys
 import time
 import warnings
@@ -9,7 +10,6 @@ import opacus
 import pickle
 from opacus import PrivacyEngine, GradSampleModule
 from opacus.optimizers import DPOptimizer
-from opacus.optimizers import DPOptimizerFastGradientClipping
 from opacus.utils.batch_memory_manager import BatchMemoryManager
 from opacus.data_loader import DPDataLoader
 import loss_traces.augmult_utils
@@ -17,7 +17,6 @@ import torchvision.transforms.v2
 from torchvision.transforms.v2 import functional as F
 import random
 from loss_traces.config import MODEL_DIR, STORAGE_DIR
-
 
 class Trainer:
     def __init__(self, args, dataloaders, device):
@@ -161,7 +160,6 @@ class Trainer:
         print(f'\n{args.exp_id}-Epoch: %d' % epoch)
         model.train()
         total_correct, total_samples = 0, 0
-
         t0 = time.time()
 
         # collect init losses
@@ -175,13 +173,14 @@ class Trainer:
                 grad_norms.append(norms)
 
         src = "A"
+        current_mode = None
         clipped_correct, clipped_total = 0, 0
         unclipped_correct, unclipped_total = 0, 0
         clipped_samples = 0
         if args.augmult > 0: 
             for (inputs, targets, _), src in seed_random_interleave(self.trainloader, self.vulnloader, seed=epoch):  # randomise batches between loaders
                 if src == "A":
-                    correct, total, _, _ = self.train_batch_selective_clipping(model, inputs, targets, _, False, args) 
+                    correct, total, _, _ = self.train_aug_batches(model, inputs, targets, _, False, args)
                     unclipped_correct += correct
                     unclipped_total += total
                 elif src == "B":
@@ -242,7 +241,25 @@ class Trainer:
             print("training with augmult:", self.augmult_factor)
             if args.selective_clip:
                 print("training with augmult and selective clipping")
-                pass # not impelmeneted yet
+                self.privacy_engine = loss_traces.augmult_utils.PrivacyEngineAugmented(opacus.GradSampleModule.GRAD_SAMPLERS)
+                model, _, self.trainloader= self.privacy_engine.make_private(max_grad_norm=args.clip_norm if args.clip_norm else 0.0,
+                                            module=model,
+                                            optimizer=self.optimizer,
+                                            data_loader=self.trainloader,
+                                            noise_multiplier=args.noise_multiplier if args.noise_multiplier else 0.0,
+                                            K=self.augmult_factor
+                                            )
+                print(type(self.optimizer))
+                print(self.optimizer)
+                self.optimizer = SelectiveDPOptimizer(self.optimizer,
+                                                       noise_multiplier=args.noise_multiplier if args.noise_multiplier else 0.0,
+                                                       max_grad_norm=args.clip_norm if args.clip_norm else 0.0,
+                                                       expected_batch_size=256)
+                print(type(self.optimizer))
+                print(self.optimizer)
+
+                self.vulnloader = DPDataLoader.from_data_loader(self.vulnloader)
+
             elif args.private:
                 print("training with augmult and full DP")
                 self.privacy_engine = loss_traces.augmult_utils.PrivacyEngineAugmented(opacus.GradSampleModule.GRAD_SAMPLERS)
@@ -264,10 +281,10 @@ class Trainer:
                                             K=self.augmult_factor
                                             )
 
-            augmentation = loss_traces.augmult_utils.AugmentationMultiplicity(self.augmult_factor)
-            model.GRAD_SAMPLERS[torch.nn.modules.conv.Conv2d] = augmentation.augmented_compute_conv_grad_sample
-            model.GRAD_SAMPLERS[torch.nn.modules.linear.Linear] = augmentation.augmented_compute_linear_grad_sample
-            model.GRAD_SAMPLERS[torch.nn.GroupNorm] = augmentation.augmented_compute_group_norm_grad_sample
+            self.augmentation = loss_traces.augmult_utils.AugmentationMultiplicity(self.augmult_factor)
+            model.GRAD_SAMPLERS[torch.nn.modules.conv.Conv2d] = self.augmentation.augmented_compute_conv_grad_sample
+            model.GRAD_SAMPLERS[torch.nn.modules.linear.Linear] = self.augmentation.augmented_compute_linear_grad_sample
+            model.GRAD_SAMPLERS[torch.nn.GroupNorm] = self.augmentation.augmented_compute_group_norm_grad_sample
 
 
         else:
@@ -284,7 +301,6 @@ class Trainer:
                                                        noise_multiplier=args.noise_multiplier if args.noise_multiplier else 0.0,
                                                        max_grad_norm=args.clip_norm if args.clip_norm else 0.0,
                                                        expected_batch_size=256)
-                # self.trainloader = DPDataLoader.from_data_loader(self.trainloader) # wraps loaders so does Poisson sampling
                 self.vulnloader = DPDataLoader.from_data_loader(self.vulnloader)
 
             elif args.private:
@@ -334,6 +350,10 @@ class Trainer:
             "trainloader_accs": [],
             "clipped_samples": []
         }
+        if args.selective_clip:
+            print("Training with clipping dataset", len(self.vulnloader.dataset))
+
+        print("Training with non-clipping dataset", len(self.trainloader.dataset))
 
         if args.selective_clip:
             epoch_trainer = self.train_epoch_selective_clip
@@ -349,8 +369,13 @@ class Trainer:
                 save_model(model, args, self.trainloader, train_acc, test_acc, checkpoint=True, epoch=epoch)
 
         print('\n==> Finished training')
+        train_indices = self.trainloader.dataset.indices
 
-        save_model(model, args, self.trainloader, train_acc, test_acc)
+        if args.selective_clip:
+            train_indices = list(self.trainloader.dataset.indices) + list(self.vulnloader.dataset.indices)
+            print("train_indices", len(train_indices))
+
+        save_model(model, args, train_indices, train_acc, test_acc)
 
 
         if args.track_free_loss:
@@ -372,9 +397,9 @@ class Trainer:
             with open(os.path.join(train_dir, f'{file}_metrics.pkl'), 'wb') as f:
                 pickle.dump(self.metrics, f)
 
-        if args.noise_multiplier:
-            epsilon = self.privacy_engine.get_epsilon(delta=1e-5)
-            print(f"Noise: {args.noise_multiplier}, Epsilon: {epsilon:.3f}")
+        # if args.noise_multiplier and not args.augmult:
+            # epsilon = self.privacy_engine.accountant.get_epsilon(delta=1e-5)
+            # print(f"Noise: {args.noise_multiplier}, Epsilon: {epsilon:.3f}")
 
         
 
@@ -431,16 +456,17 @@ class Trainer:
 
         return correct, total,  clipped, clipped_total
 
-    def train_aug_batches(self, model, inputs, targets, indices, should_clip, args):
+    def train_aug_batches(self, model, inputs, targets, indices, should_clip, args):    
+        model.train()  
+
+        self.optimizer.zero_grad(set_to_none=True)  # Try False first
+
+
 
         if args.selective_clip and should_clip:
             self.optimizer._should_clip_current_batch = True
         elif args.selective_clip and not should_clip:
             self.optimizer._should_clip_current_batch = False
-
-        model.train()
-        # model.zero_grad()
-        self.optimizer.zero_grad(set_to_none=True)
 
         inputs, targets = inputs.to(self.device, non_blocking=True), targets.to(self.device, non_blocking=True)
 
@@ -462,6 +488,7 @@ class Trainer:
             loss.mean().backward()
             clipped, clipped_total = 0, 0
 
+
         self.optimizer.step()
         
 
@@ -470,65 +497,6 @@ class Trainer:
 
         return correct, total, clipped, clipped_total
 
-    # def train_augloaders_average_losses(self, model, dataloader, epoch):
-    #     total_correct = 0
-    #     total_samples = 0
-    #     if epoch == 0:
-    #         print(type(self.optimizer))
-    #         print("training with augmentations")
-    #     trainloader_metrics = {'clipped_samples': 0, 'clipped_total': 0}
-    #     for batch_idx, (inputs, targets, indices) in enumerate(dataloader):
-    #         model.train()
-    #         self.optimizer.zero_grad()
-
-    #         N, K, C, H, W = inputs.shape  
-    #         inputs = inputs.to(self.device)
-    #         targets = targets.to(self.device)
-
-    #         # if hasattr(self.optimizer, 'expected_batch_size'):
-    #             # self.optimizer.expected_batch_size = N
-
-    #         inputs_flat = inputs.view(N*K, C, H, W)  # [N*K, C, H, W]
-    #         targets_flat = targets.repeat_interleave(K)  # [N*K]
-        
-    #     # Single forward pass for all N*K images 
-    #         outputs = model(inputs_flat)  
-            
-    #         # Compute per-sample losses 
-    #         losses = self.loss_func_sample(outputs, targets_flat)  # [N*K]
-            
-    #         # Reshape to N, K and average over augmentations
-    #         losses = losses.view(N, K)
-    #         per_sample_losses = losses.mean(dim=1)  # average over K augmentations 
-            
-    #         # Final loss
-    #         total_loss = per_sample_losses.mean()  
-            
-    #         # This is equivalent of taking avg of K gradients
-    #         total_loss.backward()
-    #         clipped, clipped_total = get_clipping_stats_from_optimizer(self.optimizer)
-    #         trainloader_metrics['clipped_samples'] += clipped
-    #         trainloader_metrics['clipped_total'] += clipped_total
-    #         self.optimizer.step()
-
-    #         with torch.no_grad():
-    #             model.eval()
-    #             first_aug_outputs = model(inputs[:, 0])  
-    #             preds = first_aug_outputs.argmax(dim=1)
-    #             # print(preds)
-    #             # print(targets)
-    #             correct = (preds == targets).sum().item()
-    #             model.train()
-
-    #         total_correct += correct
-    #         total_samples += N
-
-    #         if batch_idx % 25 == 0:
-    #             torch.cuda.empty_cache()  
-    #     print(f"Clipped samples: {trainloader_metrics['clipped_samples']}")
-    #     print(f"Total Samples: {trainloader_metrics['clipped_total']}")
-    #     acc = 100.0 * total_correct / total_samples if total_samples > 0 else 0.0
-    #     return acc
 
 
     def train_batch_selective_clipping(self, model, inputs, targets, indices, should_clip, args):
@@ -608,7 +576,7 @@ def save_tracking_data(computed_losses, args, save_dir=None):
     print(fullpath)
     pd.DataFrame(computed_losses).transpose().to_parquet(fullpath)
 
-def save_model(model, args, trainloader, train_acc, test_acc, checkpoint=False, epoch=None):
+def save_model(model, args, train_indices, train_acc, test_acc, checkpoint=False, epoch=None):
     if args.shadow_count:
         save_name = 'shadow_' + str(args.shadow_id)
     elif args.dual:
@@ -616,14 +584,14 @@ def save_model(model, args, trainloader, train_acc, test_acc, checkpoint=False, 
     elif args.track_computed_loss or args.track_free_loss:
         save_name = 'target'
     else:
-        save_name = 'model'
+        save_name = 'target'
 
     model_state_dict = model.state_dict()
 
     dic = {
         'model_state_dict': model_state_dict,
         'hyperparameters': vars(args),
-        'trained_on_indices': trainloader.dataset.indices,
+        'trained_on_indices': train_indices,
         'arch': args.arch,
         'seed': args.seed,
         'dataset': args.dataset,
@@ -643,7 +611,7 @@ def save_model(model, args, trainloader, train_acc, test_acc, checkpoint=False, 
 def seed_random_interleave(loader_a, loader_b, seed=None):
     order = ["A"] * len(loader_a) + ["B"] * len(loader_b)
 
-    rng = random.Random(seed)
+    rng = random.Random(2)
     rng.shuffle(order)
 
     iter_a = iter(loader_a)
@@ -675,7 +643,39 @@ class SelectiveDPOptimizer(DPOptimizer):
 
         # Otherwise use normal DP 
         return super().pre_step(closure)
+
+
+
+# class SelectiveDPOptimizer(DPOptimizer):
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self._should_clip_current_batch = True
     
+#     def clip_and_accumulate(self):
+#         """
+#         Performs gradient clipping (or bypasses clipping for selective batches).
+#         """
+#         # if not self._should_clip_current_batch:
+#         #     return super().clip_and_accumulate()
+#         #     print("Not clipping")
+#         #     # Skip clipping but still do the bookkeeping
+#         #     for p in self.params:
+#         #         _check_processed_flag(p.grad_sample)
+#         #         grad_sample = self._get_flat_grad_sample(p)
+                
+#         #         # No clipping - just sum all gradients directly (clip factor = 1.0)
+#         #         grad = grad_sample.sum(dim=0)  # Sum over batch dimension
+                
+#         #         if p.summed_grad is not None:
+#         #             p.summed_grad += grad
+#         #         else:
+#         #             p.summed_grad = grad
+                
+#         #         _mark_as_processed(p.grad_sample)
+#         #     return
+        
+#         # # Otherwise use normal DP clipping
+#         return super().clip_and_accumulate()
 
 def get_clipping_stats_from_optimizer(dp_optimizer):
     """Recompute clipping stats from the DP optimizer's state woo"""

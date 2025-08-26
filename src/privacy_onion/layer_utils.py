@@ -276,8 +276,14 @@ def save_layer_target_indices(exp_id, layer, exp_path, top_k=0.05, sd_value=2, m
     
     safe.to_pickle(f"{save_path}/layer_{layer}_safe.pkl")
 
-def tpr_at_fpr(exp_id, fpr=0.001, target_id='target'):
+def tpr_at_fpr(exp_id, fpr=0.001, target_id='target', selective_exp=None):
     df = get_lira_scores(exp_id, n_shadows=32, target_id=target_id)
+
+    if selective_exp:
+        path = f"{STORAGE_DIR}/models/{selective_exp}/target"
+        saves = torch.load(path)
+        true_indices = saves['trained_on_indices']
+        df["target_trained_on"] = df["og_idx"].isin(true_indices)
 
     labels = df["target_trained_on"]
     results = []
