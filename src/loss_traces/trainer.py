@@ -397,11 +397,51 @@ class Trainer:
             with open(os.path.join(train_dir, f'{file}_metrics.pkl'), 'wb') as f:
                 pickle.dump(self.metrics, f)
 
-        # if args.noise_multiplier and not args.augmult:
-            # epsilon = self.privacy_engine.accountant.get_epsilon(delta=1e-5)
-            # print(f"Noise: {args.noise_multiplier}, Epsilon: {epsilon:.3f}")
+        if args.noise_multiplier and not args.augmult:
+            epsilon = None
+            
+                # Start very close to 1.0 - this is key!
+            alpha_options = [
+                [1 + x * 1e-8 for x in range(1, 10000)],   # Smaller arrays
+                [1 + x * 1e-9 for x in range(1, 10000)], 
+                [1 + x * 1e-10 for x in range(1, 10000)],
+                [1 + x * 1e-11 for x in range(1, 10000)],
+                [1 + x * 1e-12 for x in range(1, 10000)],
+                [1 + x * 1e-13 for x in range(1, 10000)],
+                [1 + x * 1e-14 for x in range(1, 10000)],
+                [1 + x * 1e-15 for x in range(1, 10000)],
+                [1 + x * 1e-16 for x in range(1, 10000)],
+                [1 + x * 1e-17 for x in range(1, 10000)]
+            ]
+                                    
+            for i, alphas in enumerate(alpha_options):
+                try:
+                    # Treat ANY warning as failure
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("error")  # Convert warnings to exceptions!
+                        
+                        epsilon = self.privacy_engine.accountant.get_epsilon(delta=1e-5, alphas=alphas)
+                        
+                        if np.isfinite(epsilon) and epsilon > 0:
+                            print(f"✅ Clean success with option {i+1} (no warnings)")
+                            break
+                        else:
+                            raise ValueError(f"Invalid epsilon: {epsilon}")
+                            
+                except Warning as w:
+                    print(f"⚠️  Option {i+1} triggered warning: {w}")
+                    epsilon = None
+                except Exception as e:
+                    print(f"❌ Option {i+1} failed with error: {e}")
+                    epsilon = None
+                    
+                if i == len(alpha_options) - 1:  # Last option failed
+                    epsilon = float('inf')
+                    print("❌ All options failed - using infinity")
+            
+            epsilon  = 'inf' if epsilon == float('inf') else f"{epsilon:.3f}"
 
-        
+            print(f"Noise: {args.noise_multiplier}, Epsilon: {epsilon}")
 
     def test(self, model, args):
         model.eval()

@@ -231,8 +231,8 @@ class AttackPipelineRunner:
             "--layer", str(self.layer),  # Layer index for removed vulnerable points
             "--layer_folder", str(self.layer_folder) if self.layer > 0 else "",
         ]
-        if self.augmult == 0:
-            cmd.extend(["--track_computed_loss"])
+        # if self.augmult == 0:
+        #     cmd.extend(["--track_computed_loss"])
         if self.augmult > 0:
             cmd.extend(["--augmult", str(self.augmult)])
         if self.selective_clip:
