@@ -266,7 +266,7 @@ def prepare_loaders(
             args, dataset, num_classes)
             print("total indices", len(select_indices))
             # get vuln_target percentage of total data
-            k = len(vuln_target)/len(dataset)
+            k = len(vuln_target)/len(vuln_target + nonvuln_target)
             print(f"Using {k*100:.2f}% of data for clipping")
             ##TODO: This is hardcoded for now but needs to be changed to work with pipeline
             df = pd.DataFrame(get_trace_reduction("CIFAR_top5_l0", reduction="iqr"), columns=["lt_iqr"])
