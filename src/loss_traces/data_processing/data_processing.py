@@ -4,11 +4,12 @@ from typing import List, Tuple
 
 import numpy as np
 import torch
+import pandas as pd
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.transforms import transforms
 
-from loss_traces.config import DATA_DIR, MODEL_DIR
+from loss_traces.config import DATA_DIR, MODEL_DIR, STORAGE_DIR
 from loss_traces.data_processing.custom_dataset import (
     IndexCIFAR10,
     IndexCIFAR100,
@@ -17,6 +18,7 @@ from loss_traces.data_processing.custom_dataset import (
     IndexRESISC45,
     MultiAugmentDataset
 )
+from loss_traces.results.result_processing import get_trace_reduction
 
 
 def prepare_transform(
@@ -262,8 +264,22 @@ def prepare_loaders(
             print("using provided  indices ")
             select_indices = get_train_indices(
             args, dataset, num_classes)
-            train = [i for i in select_indices if i not in vuln_target]
-            vuln = [i for i in select_indices if i in vuln_target]
+            print("total indices", len(select_indices))
+            # get vuln_target percentage of total data
+            k = len(vuln_target)/len(dataset)
+            print(f"Using {k*100:.2f}% of data for clipping")
+            ##TODO: This is hardcoded for now but needs to be changed to work with pipeline
+            df = pd.DataFrame(get_trace_reduction("CIFAR_top5_l0", reduction="iqr"), columns=["lt_iqr"])
+            df['og_idx'] = df.index
+
+            # filter by select_indices
+            df = df[df['og_idx'].isin(select_indices)]
+            df = df.sort_values(by=['lt_iqr'], ascending=False)
+            print("new run")
+            num_to_select = int(len(select_indices)*k) # select k% of total data
+            vuln = df['og_idx'].tolist()[:num_to_select]
+            train = [i for i in select_indices if i not in vuln]
+            print(f"Selected {len(vuln)} samples for clipping and {len(train)} for training")
 
             trainset = Subset(dataset, train)
             print("Train set not for clipping:", len(trainset))
