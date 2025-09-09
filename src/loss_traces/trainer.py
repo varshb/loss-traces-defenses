@@ -626,25 +626,32 @@ def save_model(model, args, train_indices, train_acc, test_acc, checkpoint=False
 
 def seed_random_interleave(loader_a, loader_b, seed=None):
     order = ["A"] * len(loader_a) + ["B"] * len(loader_b)
-
-    rng = random.Random(2)
+    
+    rng = random.Random()  
     rng.shuffle(order)
-
+    
     iter_a = iter(loader_a)
     iter_b = iter(loader_b)
-
+    exhausted_a = False
+    exhausted_b = False
+    
     for src in order:
-        if src == "A":
+        if src == "A" and not exhausted_a:
             try:
                 yield next(iter_a), "A"
             except StopIteration:
-                yield next(iter_b), "B"
-        else:
+                exhausted_a = True
+                continue
+        elif src == "B" and not exhausted_b:
             try:
                 yield next(iter_b), "B"
             except StopIteration:
-                yield next(iter_a), "A"
-
+                exhausted_b = True
+                continue
+        
+        if exhausted_a and exhausted_b:
+            break
+        
 class SelectiveDPOptimizer(DPOptimizer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
